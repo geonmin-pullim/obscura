@@ -7247,7 +7247,6 @@ globalThis.navigator = {
 
 globalThis.chrome = {
   app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
-  runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {}, connect() { throw new Error("Could not establish connection. Receiving end does not exist."); }, sendMessage() { throw new Error("Could not establish connection. Receiving end does not exist."); } },
   csi() {
     const t = Date.now();
     return { onloadT: t, startE: t - Math.floor(100 + _fpRand(610) * 200), pageT: 0, tran: 5, flashVersion: "" };
@@ -7279,8 +7278,123 @@ globalThis.Notification = class Notification {
   constructor() {}
 };
 
-globalThis.WebGLRenderingContext = class WebGLRenderingContext {};
-globalThis.WebGL2RenderingContext = class WebGL2RenderingContext {};
+// Fingerprint-only WebGL surface, handed out by canvas.getContext in stealth
+// mode (see getContext). It answers the queries fingerprinting scripts make
+// (vendor/renderer, limits, extensions, precision) the way Chrome on the
+// profile's GPU does, but draws nothing: pixels read back as zeros.
+// ponytail: no real rasterizer; WebGL-rendering pages stay blank in stealth mode.
+var _GL = {
+  VENDOR: 0x1F00, RENDERER: 0x1F01, VERSION: 0x1F02, SHADING_LANGUAGE_VERSION: 0x8B8C,
+  UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246,
+  VERTEX_SHADER: 0x8B31, FRAGMENT_SHADER: 0x8B30, LOW_FLOAT: 0x8DF0, MEDIUM_FLOAT: 0x8DF1, HIGH_FLOAT: 0x8DF2,
+  LOW_INT: 0x8DF3, MEDIUM_INT: 0x8DF4, HIGH_INT: 0x8DF5, COMPILE_STATUS: 0x8B81, LINK_STATUS: 0x8B82,
+  ARRAY_BUFFER: 0x8892, ELEMENT_ARRAY_BUFFER: 0x8893, STATIC_DRAW: 0x88E4, FLOAT: 0x1406, UNSIGNED_BYTE: 0x1401,
+  TRIANGLES: 0x0004, TRIANGLE_STRIP: 0x0005, COLOR_BUFFER_BIT: 0x4000, DEPTH_BUFFER_BIT: 0x0100, RGBA: 0x1908,
+  TEXTURE_2D: 0x0DE1, DEPTH_TEST: 0x0B71, BLEND: 0x0BE2, NO_ERROR: 0,
+};
+var _GL_PARAMS = {
+  0x0D33: 16384, 0x851C: 16384, 0x84E8: 16384, 0x8869: 16, 0x8DFB: 4096, 0x8DFD: 1024, 0x8DFC: 30,
+  0x8872: 16, 0x8B4C: 16, 0x8B4D: 32, 0x0D52: 8, 0x0D53: 8, 0x0D54: 8, 0x0D55: 8, 0x0D56: 24, 0x0D57: 8,
+  0x84FF: 16, 0x80A9: 4, 0x80A8: 1, 0x0D50: 4, 0x0B73: 16,
+};
+var _GL2_PARAMS = {
+  0x8073: 2048, 0x88FF: 2048, 0x8824: 8, 0x8CDF: 8, 0x8D57: 16, 0x8A30: 65536, 0x8A2F: 24, 0x8A2B: 12,
+  0x8A2D: 12, 0x8A2E: 24, 0x8B49: 4096, 0x8B4A: 16384, 0x9122: 64, 0x9125: 124, 0x8C8A: 4, 0x8C8B: 4, 0x8C80: 64,
+  0x8D6B: 4294967295, 0x9111: 0, 0x8B8B: 0x8B8B,
+};
+var _GL_EXT = ['ANGLE_instanced_arrays', 'EXT_blend_minmax', 'EXT_clip_control', 'EXT_color_buffer_half_float',
+  'EXT_depth_clamp', 'EXT_disjoint_timer_query', 'EXT_float_blend', 'EXT_frag_depth', 'EXT_polygon_offset_clamp',
+  'EXT_shader_texture_lod', 'EXT_texture_compression_bptc', 'EXT_texture_compression_rgtc',
+  'EXT_texture_filter_anisotropic', 'EXT_texture_mirror_clamp_to_edge', 'EXT_sRGB', 'KHR_parallel_shader_compile',
+  'OES_element_index_uint', 'OES_fbo_render_mipmap', 'OES_standard_derivatives', 'OES_texture_float',
+  'OES_texture_float_linear', 'OES_texture_half_float', 'OES_texture_half_float_linear', 'OES_vertex_array_object',
+  'WEBGL_blend_func_extended', 'WEBGL_color_buffer_float', 'WEBGL_compressed_texture_s3tc',
+  'WEBGL_compressed_texture_s3tc_srgb', 'WEBGL_debug_renderer_info', 'WEBGL_debug_shaders', 'WEBGL_depth_texture',
+  'WEBGL_draw_buffers', 'WEBGL_lose_context', 'WEBGL_multi_draw', 'WEBGL_polygon_mode'];
+var _GL2_EXT = ['EXT_clip_control', 'EXT_color_buffer_float', 'EXT_color_buffer_half_float', 'EXT_conservative_depth',
+  'EXT_depth_clamp', 'EXT_disjoint_timer_query_webgl2', 'EXT_float_blend', 'EXT_polygon_offset_clamp',
+  'EXT_render_snorm', 'EXT_texture_compression_bptc', 'EXT_texture_compression_rgtc', 'EXT_texture_filter_anisotropic',
+  'EXT_texture_mirror_clamp_to_edge', 'EXT_texture_norm16', 'KHR_parallel_shader_compile', 'NV_shader_noperspective_interpolation',
+  'OES_draw_buffers_indexed', 'OES_sample_variables', 'OES_shader_multisample_interpolation', 'OES_texture_float_linear',
+  'OVR_multiview2', 'WEBGL_blend_func_extended', 'WEBGL_clip_cull_distance', 'WEBGL_compressed_texture_s3tc',
+  'WEBGL_compressed_texture_s3tc_srgb', 'WEBGL_debug_renderer_info', 'WEBGL_debug_shaders', 'WEBGL_lose_context',
+  'WEBGL_multi_draw', 'WEBGL_polygon_mode', 'WEBGL_provoking_vertex', 'WEBGL_stencil_texturing'];
+
+function _makeGLClass(name, v2) {
+  var C = { [name]: class {
+    constructor() { throw new TypeError('Illegal constructor'); }
+  } }[name];
+  var P = C.prototype;
+  Object.defineProperty(P, Symbol.toStringTag, { value: name, configurable: true });
+  Object.keys(_GL).forEach(function(k) { C[k] = _GL[k]; P[k] = _GL[k]; });
+  function m(n, fn) { P[n] = _markNative(fn); Object.defineProperty(P[n], 'name', { value: n }); }
+  function obj(tag) { var o = {}; Object.defineProperty(o, Symbol.toStringTag, { value: tag }); return o; }
+  m('getParameter', function(p) {
+    switch (p) {
+      case 0x1F00: return 'WebKit';
+      case 0x1F01: return 'WebKit WebGL';
+      case 0x1F02: return v2 ? 'WebGL 2.0 (OpenGL ES 3.0 Chromium)' : 'WebGL 1.0 (OpenGL ES 2.0 Chromium)';
+      case 0x8B8C: return v2 ? 'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)' : 'WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)';
+      case 0x9245: return _fp('gpuVendor');
+      case 0x9246: return _fp('gpu');
+      case 0x0D3A: return new Int32Array([32767, 32767]);
+      case 0x846E: return new Float32Array([1, 1]);
+      case 0x846D: return new Float32Array([1, 1024]);
+      case 0x0BA2: return new Int32Array([0, 0, this.drawingBufferWidth, this.drawingBufferHeight]);
+    }
+    if (p in _GL_PARAMS) return _GL_PARAMS[p];
+    if (v2 && p in _GL2_PARAMS) return _GL2_PARAMS[p];
+    return null;
+  });
+  m('getSupportedExtensions', function() { return (v2 ? _GL2_EXT : _GL_EXT).slice(); });
+  m('getExtension', function(n) {
+    if ((v2 ? _GL2_EXT : _GL_EXT).indexOf(n) < 0) return null;
+    if (n === 'WEBGL_debug_renderer_info') { var e = obj('WEBGL_debug_renderer_info'); e.UNMASKED_VENDOR_WEBGL = 0x9245; e.UNMASKED_RENDERER_WEBGL = 0x9246; return e; }
+    if (n === 'EXT_texture_filter_anisotropic') { var a = obj('EXT_texture_filter_anisotropic'); a.TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE; a.MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF; return a; }
+    if (n === 'WEBGL_lose_context') { var l = obj('WEBGL_lose_context'); l.loseContext = function() {}; l.restoreContext = function() {}; return l; }
+    return obj(n);
+  });
+  m('getShaderPrecisionFormat', function(shaderType, precisionType) {
+    var f = obj('WebGLShaderPrecisionFormat');
+    var isInt = precisionType >= 0x8DF3;
+    f.rangeMin = isInt ? 31 : 127; f.rangeMax = isInt ? 30 : 127; f.precision = isInt ? 0 : 23;
+    return f;
+  });
+  m('getContextAttributes', function() {
+    return { alpha: true, antialias: true, depth: true, desynchronized: false, failIfMajorPerformanceCaveat: false,
+      powerPreference: 'default', premultipliedAlpha: true, preserveDrawingBuffer: false, stencil: false, xrCompatible: false };
+  });
+  m('isContextLost', function() { return false; });
+  m('getError', function() { return 0; });
+  m('getShaderParameter', function() { return true; });
+  m('getProgramParameter', function() { return true; });
+  m('getShaderInfoLog', function() { return ''; });
+  m('getProgramInfoLog', function() { return ''; });
+  m('getAttribLocation', function() { return 0; });
+  m('getUniformLocation', function() { return obj('WebGLUniformLocation'); });
+  m('readPixels', function(x, y, w, h, fmt, type, out) { if (out && out.fill) out.fill(0); });
+  ['createBuffer', 'createShader', 'createProgram', 'createTexture', 'createFramebuffer', 'createRenderbuffer', 'createVertexArray']
+    .forEach(function(n) { var tag = 'WebGL' + n.slice(6); m(n, function() { return obj(tag); }); });
+  ['activeTexture', 'attachShader', 'bindAttribLocation', 'bindBuffer', 'bindFramebuffer', 'bindRenderbuffer', 'bindTexture',
+    'bindVertexArray', 'blendFunc', 'bufferData', 'bufferSubData', 'clear', 'clearColor', 'clearDepth', 'colorMask',
+    'compileShader', 'cullFace', 'deleteBuffer', 'deleteProgram', 'deleteShader', 'deleteTexture', 'depthFunc', 'disable',
+    'disableVertexAttribArray', 'drawArrays', 'drawElements', 'enable', 'enableVertexAttribArray', 'finish', 'flush',
+    'framebufferTexture2D', 'linkProgram', 'pixelStorei', 'scissor', 'shaderSource', 'texImage2D', 'texParameteri',
+    'uniform1f', 'uniform1i', 'uniform2f', 'uniform3f', 'uniform4f', 'uniform1fv', 'uniform2fv', 'uniform3fv', 'uniform4fv',
+    'uniformMatrix4fv', 'useProgram', 'vertexAttribPointer', 'viewport']
+    .forEach(function(n) { m(n, function() {}); });
+  _markNative(C);
+  return C;
+}
+globalThis.WebGLRenderingContext = _makeGLClass('WebGLRenderingContext', false);
+globalThis.WebGL2RenderingContext = _makeGLClass('WebGL2RenderingContext', true);
+function _newGLContext(canvas, v2) {
+  var ctx = Object.create((v2 ? WebGL2RenderingContext : WebGLRenderingContext).prototype);
+  Object.defineProperty(ctx, 'canvas', { value: canvas });
+  Object.defineProperty(ctx, 'drawingBufferWidth', { get: function() { return Number(canvas.width) || 300; } });
+  Object.defineProperty(ctx, 'drawingBufferHeight', { get: function() { return Number(canvas.height) || 150; } });
+  return ctx;
+}
 
 class Screen {
   constructor(w, h, availW, availH) {
@@ -11102,7 +11216,7 @@ function _structuredClone(value, seen) {
     seen.set(value, copy);
     return copy;
   }
-  if (value instanceof SharedArrayBuffer) {
+  if (Object.prototype.toString.call(value) === '[object SharedArrayBuffer]') {
     return value; // transferable, not copyable
   }
   if (value instanceof Date) return new Date(value.getTime());
@@ -13571,6 +13685,7 @@ globalThis.HTMLCanvasElement = HTMLCanvasElement;
 
 HTMLCanvasElement.prototype.getContext = function getContext(type) {
   if (type === '2d') {
+    if (this._gl) return null;
     if (!this._ctx) {
       try { this._ctx = new _Canvas2D(this); }
       catch (_error) { return null; }
@@ -13583,7 +13698,16 @@ HTMLCanvasElement.prototype.getContext = function getContext(type) {
     // reported successful shader/program creation while every draw call was a
     // no-op. Feature-detecting applications consequently selected their WebGL
     // path, hid their HTML/image fallback, and produced a blank canvas.
-    return null;
+    // Stealth mode trades that for a fingerprint-only context: a desktop
+    // Chrome with no WebGL at all is a stronger bot signal than a blank canvas.
+    if (!globalThis.__obscura_stealth || this._ctx) return null;
+    var v2 = type === 'webgl2';
+    if (!this._gl || this._glV2 !== v2) {
+      if (this._gl) return null; // Chrome returns null for a second, different context kind
+      this._gl = _newGLContext(this, v2);
+      this._glV2 = v2;
+    }
+    return this._gl;
   }
   return null;
 };
@@ -13764,9 +13888,20 @@ globalThis.OfflineAudioContext = class OfflineAudioContext extends AudioContext 
 };
 globalThis.webkitAudioContext = globalThis.AudioContext;
 
+var _VOICES = [
+  ['Microsoft David - English (United States)', 'en-US', true, true],
+  ['Microsoft Mark - English (United States)', 'en-US', false, true],
+  ['Microsoft Zira - English (United States)', 'en-US', false, true],
+  ['Google Deutsch', 'de-DE'], ['Google US English', 'en-US'], ['Google UK English Female', 'en-GB'],
+  ['Google UK English Male', 'en-GB'], ['Google español', 'es-ES'], ['Google español de Estados Unidos', 'es-US'],
+  ['Google français', 'fr-FR'], ['Google हिन्दी', 'hi-IN'], ['Google Bahasa Indonesia', 'id-ID'],
+  ['Google italiano', 'it-IT'], ['Google 日本語', 'ja-JP'], ['Google 한국의', 'ko-KR'], ['Google Nederlands', 'nl-NL'],
+  ['Google polski', 'pl-PL'], ['Google português do Brasil', 'pt-BR'], ['Google русский', 'ru-RU'],
+  ['Google 普通话（中国大陆）', 'zh-CN'], ['Google 粤語（香港）', 'zh-HK'], ['Google 國語（臺灣）', 'zh-TW'],
+].map(function(v) { return { voiceURI: v[0], name: v[0], lang: v[1], localService: !!v[3], default: !!v[2] }; });
 globalThis.speechSynthesis = {
   speaking: false, pending: false, paused: false,
-  getVoices() { return [{ name:'Google US English', lang:'en-US', default:true, localService:true, voiceURI:'Google US English' }]; },
+  getVoices() { return _VOICES; },
   speak() {}, cancel() {}, pause() {}, resume() {},
   addEventListener() {}, removeEventListener() {},
   onvoiceschanged: null,
@@ -13962,6 +14097,70 @@ navigator.keyboard = {
 };
 navigator.gpu = { requestAdapter() { return Promise.resolve(null); } };
 navigator.wakeLock = { request() { return Promise.reject(new DOMException('Not allowed', 'NotAllowedError')); } };
+// Device APIs desktop Chrome exposes on secure origins; their absence is a headless tell.
+navigator.bluetooth = { getAvailability() { return Promise.resolve(false); }, requestDevice() { return Promise.reject(new DOMException('User cancelled the requestDevice() chooser.', 'NotFoundError')); } };
+navigator.usb = { getDevices() { return Promise.resolve([]); }, requestDevice() { return Promise.reject(new DOMException('No device selected.', 'NotFoundError')); }, onconnect: null, ondisconnect: null };
+navigator.hid = { getDevices() { return Promise.resolve([]); }, requestDevice() { return Promise.resolve([]); }, onconnect: null, ondisconnect: null };
+navigator.serial = { getPorts() { return Promise.resolve([]); }, requestPort() { return Promise.reject(new DOMException('No port selected by the user.', 'NotFoundError')); }, onconnect: null, ondisconnect: null };
+navigator.scheduling = { isInputPending() { return false; } };
+
+// Chrome keeps every navigator member on Navigator.prototype: the instance has
+// no own properties and its prototype is exactly Navigator.prototype. Hoist the
+// own props assigned above and the getters from the intermediate prototype hop
+// onto Navigator.prototype, so hasOwnProperty, getOwnPropertyNames and
+// getOwnPropertyDescriptor(Navigator.prototype, k) all look native.
+(function _hoistNavigator() {
+  var nav = globalThis.navigator;
+  var P = Navigator.prototype;
+  var hop = Object.getPrototypeOf(nav);
+  function native(fn, str) { return str ? _markNativeAs(fn, str) : _markNative(fn); }
+  function hoist(obj) {
+    Object.getOwnPropertyNames(obj).forEach(function(k) {
+      var d = Object.getOwnPropertyDescriptor(obj, k);
+      if (d.get) {
+        native(d.get, 'function get ' + k + '() { [native code] }');
+        Object.defineProperty(P, k, { get: d.get, set: undefined, enumerable: true, configurable: true });
+      } else if (typeof d.value === 'function') {
+        native(d.value);
+        Object.defineProperty(P, k, { value: d.value, writable: true, enumerable: true, configurable: true });
+      } else {
+        var v = d.value;
+        var g = native(function() { return v; }, 'function get ' + k + '() { [native code] }');
+        Object.defineProperty(P, k, { get: g, set: undefined, enumerable: true, configurable: true });
+      }
+    });
+  }
+  if (hop !== P) hoist(hop);
+  hoist(nav);
+  Object.getOwnPropertyNames(nav).forEach(function(k) { delete nav[k]; });
+  Object.setPrototypeOf(nav, P);
+  Object.defineProperty(P, Symbol.toStringTag, { value: 'Navigator', configurable: true });
+})();
+
+// isSecureContext is true on https/localhost pages; undefined is a headless tell.
+Object.defineProperty(globalThis, 'isSecureContext', {
+  get: _markNativeAs(function() {
+    var l = globalThis.location;
+    return !!l && (l.protocol === 'https:' || l.protocol === 'wss:' || l.hostname === 'localhost' || l.hostname === '127.0.0.1');
+  }, 'function get isSecureContext() { [native code] }'),
+  enumerable: true, configurable: true,
+});
+// Chrome only exposes SharedArrayBuffer to cross-origin-isolated pages (COOP+COEP),
+// which ordinary sites are not.
+if (!globalThis.crossOriginIsolated) delete globalThis.SharedArrayBuffer;
+// Desktop Chrome defines the touch interfaces even without a touchscreen
+// (maxTouchPoints stays 0 and 'ontouchstart' in window stays false).
+if (typeof TouchEvent === 'undefined') {
+  globalThis.TouchList = _markNative(class TouchList { constructor(t) { this._t = t || []; this.length = this._t.length; } item(i) { return this._t[i] || null; } });
+  globalThis.Touch = _markNative(class Touch { constructor(o = {}) { Object.assign(this, { identifier: 0, target: null, clientX: 0, clientY: 0, screenX: 0, screenY: 0, pageX: 0, pageY: 0, radiusX: 0, radiusY: 0, rotationAngle: 0, force: 0 }, o); } });
+  globalThis.TouchEvent = _markNative(class TouchEvent extends UIEvent {
+    constructor(t, o = {}) {
+      super(t, o);
+      this.touches = new TouchList(o.touches); this.targetTouches = new TouchList(o.targetTouches); this.changedTouches = new TouchList(o.changedTouches);
+      this.altKey = !!o.altKey; this.ctrlKey = !!o.ctrlKey; this.metaKey = !!o.metaKey; this.shiftKey = !!o.shiftKey;
+    }
+  });
+}
 
 globalThis.opener = null;
 
@@ -15632,6 +15831,9 @@ globalThis.__obscura_init = function() {
   // The host sets __obscura_frameId on a frame realm before calling this.
   _realmFrameId = globalThis.__obscura_frameId >>> 0;
   _browserPostedTaskWakePending = false;
+  // The embedder re-installs SharedArrayBuffer on each realm; Chrome hides it
+  // from pages that are not cross-origin isolated.
+  if (!globalThis.crossOriginIsolated) delete globalThis.SharedArrayBuffer;
   for (const queue of _browserPostedTaskQueues) _browserPostedTaskDiscardQueue(queue);
   _fpSeed = Date.now() ^ (Math.random() * 0xFFFFFFFF >>> 0);
   _fpCache = null;
