@@ -6614,6 +6614,10 @@ class HTMLMediaElement extends Element {
   static HAVE_FUTURE_DATA = 3;
   static HAVE_ENOUGH_DATA = 4;
   canPlayType(type) {
+    // No media decoder backs this element, so answer honestly ('') outside
+    // stealth mode; stealth reports what Chrome on Windows would, since a
+    // browser that can play nothing is a stronger bot signal.
+    if (!globalThis.__obscura_stealth) return '';
     var m = /^\s*([a-z0-9.+-]+\/[a-z0-9.+-]+)\s*(?:;\s*codecs\s*=\s*"?([^"]*)"?)?/i.exec(String(type));
     if (!m) return '';
     var containers = { 'video/mp4': 1, 'video/webm': 1, 'video/ogg': 1, 'audio/mp4': 1, 'audio/mpeg': 1, 'audio/mp3': 1,
@@ -7606,6 +7610,10 @@ function _serializeBody(initBody, headers, synthesizeContentType = true) {
   }
   if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(initBody) && initBody.buffer instanceof ArrayBuffer) {
     return new Uint8Array(initBody.buffer, initBody.byteOffset, initBody.byteLength);
+  }
+  // Fetch spec: a USVString body extracts with Content-Type text/plain;charset=UTF-8.
+  if (synthesizeContentType && !Object.keys(headers).some(k => k.toLowerCase() === 'content-type')) {
+    headers['Content-Type'] = 'text/plain;charset=UTF-8';
   }
   return new TextEncoder().encode(typeof initBody === 'string' ? initBody : String(initBody));
 }

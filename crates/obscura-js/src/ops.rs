@@ -3270,12 +3270,13 @@ async fn op_fetch_url(
         let stealth = {
             let st = state.borrow();
             let gs = st.borrow::<SharedState>().clone();
-            let client = gs.borrow().stealth_client.clone();
-            client
+            let gs = gs.borrow();
+            (gs.stealth_client.clone(), gs.url.clone())
         };
-        if let Some(stealth) = stealth {
+        if let (Some(stealth), document_url) = stealth {
             return stealth_fetch_all(
                 stealth,
+                document_url,
                 url.clone(),
                 req_method.as_str().to_string(),
                 custom_headers.clone(),
@@ -3637,6 +3638,47 @@ fn fetch_response(
     }
 }
 
+/// Chrome's request metadata for a scripted fetch()/XHR from `document_url`:
+/// Accept, Sec-Fetch-{Site,Mode,Dest} and a strict-origin-when-cross-origin
+/// Referer (full URL same-origin, origin only cross-origin, none on an
+/// https->http downgrade).
+fn scripted_request_metadata(
+    document_url: &str,
+    target: &url::Url,
+    mode: &str,
+) -> Vec<(String, String)> {
+    let mut out = vec![
+        ("accept".to_string(), "*/*".to_string()),
+        ("sec-fetch-mode".to_string(), mode.to_string()),
+        ("sec-fetch-dest".to_string(), "empty".to_string()),
+    ];
+    let Ok(mut source) = url::Url::parse(document_url) else {
+        return out;
+    };
+    let site = if source.origin() == target.origin() {
+        "same-origin"
+    } else if same_site(&source, target) {
+        "same-site"
+    } else {
+        "cross-site"
+    };
+    out.push(("sec-fetch-site".to_string(), site.to_string()));
+    if matches!(source.scheme(), "http" | "https")
+        && !(source.scheme() == "https" && target.scheme() == "http")
+    {
+        source.set_fragment(None);
+        let _ = source.set_username("");
+        let _ = source.set_password(None);
+        let referer = if site == "same-origin" {
+            source.to_string()
+        } else {
+            format!("{}/", source.origin().ascii_serialization())
+        };
+        out.push(("referer".to_string(), referer));
+    }
+    out
+}
+
 /// Stealth-mode scripted fetch()/XHR: mirrors op_fetch_url's redirect, SSRF,
 /// and CORS semantics but sends every hop through the wreq stealth client so
 /// the request carries the Chrome TLS fingerprint and client hints. Cookie
@@ -3646,6 +3688,7 @@ fn fetch_response(
 #[cfg(feature = "stealth")]
 async fn stealth_fetch_all(
     stealth: Arc<StealthHttpClient>,
+    document_url: String,
     url: String,
     method: String,
     custom_headers: HashMap<String, String>,
@@ -3684,8 +3727,17 @@ async fn stealth_fetch_all(
         let mut req_headers: HashMap<String, String> = HashMap::new();
         let current_is_cross_origin = parsed_current.origin().ascii_serialization() != page_origin;
         crossed_origin |= current_is_cross_origin;
-        if current_is_cross_origin {
+        if current_is_cross_origin || !matches!(current_method.as_str(), "GET" | "HEAD") {
             req_headers.insert("origin".to_string(), page_origin.clone());
+        }
+        if !internal_load {
+            // Scripted fetch()/XHR metadata as Chrome sends it. Without these the
+            // wreq Chrome emulation fills in top-level navigation defaults
+            // (Accept: text/html, Sec-Fetch-Mode: navigate, Sec-Fetch-Site: none),
+            // which no real XHR carries.
+            // ponytail: internal script/CSS loads keep the emulation defaults; they
+            // need per-destination values (script/style) the op does not receive.
+            req_headers.extend(scripted_request_metadata(&document_url, &parsed_current, &mode));
         }
         for (k, v) in &current_headers {
             req_headers.insert(k.to_lowercase(), v.clone());
@@ -3882,6 +3934,26 @@ pub(crate) fn glob_match(pattern: &str, url: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scripted_request_metadata_matches_chrome() {
+        let get = |doc: &str, target: &str| -> std::collections::HashMap<String, String> {
+            super::scripted_request_metadata(doc, &url::Url::parse(target).unwrap(), "cors")
+                .into_iter()
+                .collect()
+        };
+        let same = get("https://a.example.com/p?q=1#f", "https://a.example.com/api");
+        assert_eq!(same["sec-fetch-site"], "same-origin");
+        assert_eq!(same["referer"], "https://a.example.com/p?q=1");
+        assert_eq!(same["sec-fetch-dest"], "empty");
+        assert_eq!(same["accept"], "*/*");
+        let site = get("https://a.example.com/p", "https://b.example.com/api");
+        assert_eq!(site["sec-fetch-site"], "same-site");
+        assert_eq!(site["referer"], "https://a.example.com/");
+        let cross = get("https://a.example.com/p", "https://other.org/api");
+        assert_eq!(cross["sec-fetch-site"], "cross-site");
+        assert!(!get("https://a.example.com/p", "http://a.example.com/x").contains_key("referer"));
+    }
+
     use super::{
         FetchCredentials, ObscuraState, cors_response_allows, cors_unsafe_request_header_names,
         glob_match, is_cors_safelisted_content_type, is_cors_safelisted_request_header,
