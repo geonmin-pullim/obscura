@@ -6613,7 +6613,18 @@ class HTMLMediaElement extends Element {
   static HAVE_CURRENT_DATA = 2;
   static HAVE_FUTURE_DATA = 3;
   static HAVE_ENOUGH_DATA = 4;
-  canPlayType(_type) { return ''; }
+  canPlayType(type) {
+    var m = /^\s*([a-z0-9.+-]+\/[a-z0-9.+-]+)\s*(?:;\s*codecs\s*=\s*"?([^"]*)"?)?/i.exec(String(type));
+    if (!m) return '';
+    var containers = { 'video/mp4': 1, 'video/webm': 1, 'video/ogg': 1, 'audio/mp4': 1, 'audio/mpeg': 1, 'audio/mp3': 1,
+      'audio/webm': 1, 'audio/ogg': 1, 'audio/flac': 1, 'audio/wav': 1, 'audio/x-m4a': 1, 'audio/aac': 1, 'application/ogg': 1 };
+    if (!containers[m[1].toLowerCase()]) return '';
+    if (!m[2]) return 'maybe';
+    var ok = m[2].split(',').every(function(c) {
+      return /^(avc1|avc3|hev1|hvc1|vp8|vp9|vp09|vp8\.0|av01|mp4a|opus|vorbis|flac|mp3|theora|1)(\.|$)/i.test(c.trim());
+    });
+    return ok ? 'probably' : '';
+  }
   load() {}
   play() {
     return Promise.reject(new DOMException(
@@ -7291,6 +7302,19 @@ var _GL = {
   ARRAY_BUFFER: 0x8892, ELEMENT_ARRAY_BUFFER: 0x8893, STATIC_DRAW: 0x88E4, FLOAT: 0x1406, UNSIGNED_BYTE: 0x1401,
   TRIANGLES: 0x0004, TRIANGLE_STRIP: 0x0005, COLOR_BUFFER_BIT: 0x4000, DEPTH_BUFFER_BIT: 0x0100, RGBA: 0x1908,
   TEXTURE_2D: 0x0DE1, DEPTH_TEST: 0x0B71, BLEND: 0x0BE2, NO_ERROR: 0,
+  MAX_TEXTURE_SIZE: 0x0D33, MAX_VIEWPORT_DIMS: 0x0D3A, MAX_RENDERBUFFER_SIZE: 0x84E8, MAX_CUBE_MAP_TEXTURE_SIZE: 0x851C,
+  MAX_VERTEX_ATTRIBS: 0x8869, MAX_VERTEX_UNIFORM_VECTORS: 0x8DFB, MAX_FRAGMENT_UNIFORM_VECTORS: 0x8DFD,
+  MAX_VARYING_VECTORS: 0x8DFC, MAX_TEXTURE_IMAGE_UNITS: 0x8872, MAX_VERTEX_TEXTURE_IMAGE_UNITS: 0x8B4C,
+  MAX_COMBINED_TEXTURE_IMAGE_UNITS: 0x8B4D, ALIASED_LINE_WIDTH_RANGE: 0x846E, ALIASED_POINT_SIZE_RANGE: 0x846D,
+  RED_BITS: 0x0D52, GREEN_BITS: 0x0D53, BLUE_BITS: 0x0D54, ALPHA_BITS: 0x0D55, DEPTH_BITS: 0x0D56, STENCIL_BITS: 0x0D57,
+  SAMPLES: 0x80A9, SAMPLE_BUFFERS: 0x80A8, SUBPIXEL_BITS: 0x0D50, VIEWPORT: 0x0BA2,
+};
+var _GL2 = {
+  MAX_3D_TEXTURE_SIZE: 0x8073, MAX_ARRAY_TEXTURE_LAYERS: 0x88FF, MAX_DRAW_BUFFERS: 0x8824, MAX_COLOR_ATTACHMENTS: 0x8CDF,
+  MAX_SAMPLES: 0x8D57, MAX_UNIFORM_BLOCK_SIZE: 0x8A30, MAX_COMBINED_UNIFORM_BLOCKS: 0x8A2E, MAX_VERTEX_UNIFORM_BLOCKS: 0x8A2B,
+  MAX_FRAGMENT_UNIFORM_BLOCKS: 0x8A2D, MAX_UNIFORM_BUFFER_BINDINGS: 0x8A2F, MAX_VERTEX_UNIFORM_COMPONENTS: 0x8B4A,
+  MAX_FRAGMENT_UNIFORM_COMPONENTS: 0x8B49, MAX_VERTEX_OUTPUT_COMPONENTS: 0x9122, MAX_FRAGMENT_INPUT_COMPONENTS: 0x9125,
+  MAX_ELEMENT_INDEX: 0x8D6B, MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS: 0x8C8B,
 };
 var _GL_PARAMS = {
   0x0D33: 16384, 0x851C: 16384, 0x84E8: 16384, 0x8869: 16, 0x8DFB: 4096, 0x8DFD: 1024, 0x8DFC: 30,
@@ -7326,7 +7350,8 @@ function _makeGLClass(name, v2) {
   } }[name];
   var P = C.prototype;
   Object.defineProperty(P, Symbol.toStringTag, { value: name, configurable: true });
-  Object.keys(_GL).forEach(function(k) { C[k] = _GL[k]; P[k] = _GL[k]; });
+  var consts = v2 ? Object.assign({}, _GL, _GL2) : _GL;
+  Object.keys(consts).forEach(function(k) { C[k] = consts[k]; P[k] = consts[k]; });
   function m(n, fn) { P[n] = _markNative(fn); Object.defineProperty(P[n], 'name', { value: n }); }
   function obj(tag) { var o = {}; Object.defineProperty(o, Symbol.toStringTag, { value: tag }); return o; }
   m('getParameter', function(p) {
