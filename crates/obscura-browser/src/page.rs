@@ -2365,6 +2365,10 @@ impl Page {
         }
 
         let client = self.http_client.clone();
+        // Parser scripts must share the stealth transport (Chrome TLS/headers)
+        // like stylesheets do; the plain client gave them a second fingerprint.
+        #[cfg(feature = "stealth")]
+        let stealth_client = self.stealth_client.clone();
         let page_callbacks = self.callbacks.clone();
         let script_initiator = self
             .url
@@ -2374,6 +2378,8 @@ impl Page {
             .iter()
             .map(|(idx, url)| {
                 let client = client.clone();
+                #[cfg(feature = "stealth")]
+                let stealth_client = stealth_client.clone();
                 let cbs = page_callbacks.clone();
                 let initiator = script_initiator.clone();
                 let url = url.clone();
@@ -2406,9 +2412,18 @@ impl Page {
                         return Some((idx, url, resp));
                     }
                     let request = ResourceRequest::subresource(ResourceType::Script, &initiator);
-                    match client
+                    #[cfg(feature = "stealth")]
+                    let result = match stealth_client {
+                        Some(stealth) => {
+                            stealth.fetch_resource_with_callbacks(&parsed, request, Some(&cbs)).await
+                        }
+                        None => client.fetch_resource_with_callbacks(&parsed, request, Some(&cbs)).await,
+                    };
+                    #[cfg(not(feature = "stealth"))]
+                    let result = client
                         .fetch_resource_with_callbacks(&parsed, request, Some(&cbs))
-                        .await
+                        .await;
+                    match result
                     {
                         Ok(resp) => Some((idx, url, resp)),
                         Err(e) => {

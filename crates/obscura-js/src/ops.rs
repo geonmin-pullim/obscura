@@ -2950,8 +2950,11 @@ async fn op_fetch_url(
     #[string] origin: String,
     #[string] mode: String,
     #[string] credentials: String,
-    internal_load: bool,
+    // Request destination of an engine-internal load ("script", "style",
+    // "iframe"); "" for page fetch()/XHR.
+    #[string] destination: String,
 ) -> Result<String, deno_error::JsErrorBox> {
+    let internal_load = !destination.is_empty();
     let body = body.to_vec();
     tracing::debug!(
         "op_fetch_url called: {} {} (intercept check pending)",
@@ -3287,6 +3290,7 @@ async fn op_fetch_url(
                 callbacks.clone(),
                 allow_private_network,
                 internal_load,
+                destination,
             )
             .await;
         }
@@ -3638,7 +3642,8 @@ fn fetch_response(
     }
 }
 
-/// Chrome's request metadata for a scripted fetch()/XHR from `document_url`:
+/// Chrome's request metadata for a request from `document_url` (fetch()/XHR
+/// when `destination` is empty, else a script/style/iframe load):
 /// Accept, Sec-Fetch-{Site,Mode,Dest} and a strict-origin-when-cross-origin
 /// Referer (full URL same-origin, origin only cross-origin, none on an
 /// https->http downgrade).
@@ -3646,12 +3651,23 @@ fn scripted_request_metadata(
     document_url: &str,
     target: &url::Url,
     mode: &str,
+    destination: &str,
 ) -> Vec<(String, String)> {
-    let mut out = vec![
-        ("accept".to_string(), "*/*".to_string()),
-        ("sec-fetch-mode".to_string(), mode.to_string()),
-        ("sec-fetch-dest".to_string(), "empty".to_string()),
-    ];
+    let mut out = match destination {
+        // An iframe load is a navigation: keep the emulation's document Accept
+        // and navigate mode, only correct the destination.
+        "iframe" => vec![("sec-fetch-dest".to_string(), "iframe".to_string())],
+        "style" => vec![
+            ("accept".to_string(), "text/css,*/*;q=0.1".to_string()),
+            ("sec-fetch-mode".to_string(), mode.to_string()),
+            ("sec-fetch-dest".to_string(), "style".to_string()),
+        ],
+        dest => vec![
+            ("accept".to_string(), "*/*".to_string()),
+            ("sec-fetch-mode".to_string(), mode.to_string()),
+            ("sec-fetch-dest".to_string(), if dest.is_empty() { "empty" } else { dest }.to_string()),
+        ],
+    };
     let Ok(mut source) = url::Url::parse(document_url) else {
         return out;
     };
@@ -3699,6 +3715,7 @@ async fn stealth_fetch_all(
     callbacks: Option<Arc<CallbackRegistry>>,
     allow_private_network: bool,
     internal_load: bool,
+    destination: String,
 ) -> Result<String, deno_error::JsErrorBox> {
     let mut current_url = url.clone();
     let mut current_method = method;
@@ -3727,18 +3744,23 @@ async fn stealth_fetch_all(
         let mut req_headers: HashMap<String, String> = HashMap::new();
         let current_is_cross_origin = parsed_current.origin().ascii_serialization() != page_origin;
         crossed_origin |= current_is_cross_origin;
-        if current_is_cross_origin || !matches!(current_method.as_str(), "GET" | "HEAD") {
+        // Chrome sends Origin on CORS requests and on non-GET/HEAD ones; a no-cors
+        // script/style GET or an iframe navigation carries none.
+        if (mode == "cors" && current_is_cross_origin)
+            || !matches!(current_method.as_str(), "GET" | "HEAD")
+        {
             req_headers.insert("origin".to_string(), page_origin.clone());
         }
-        if !internal_load {
-            // Scripted fetch()/XHR metadata as Chrome sends it. Without these the
-            // wreq Chrome emulation fills in top-level navigation defaults
-            // (Accept: text/html, Sec-Fetch-Mode: navigate, Sec-Fetch-Site: none),
-            // which no real XHR carries.
-            // ponytail: internal script/CSS loads keep the emulation defaults; they
-            // need per-destination values (script/style) the op does not receive.
-            req_headers.extend(scripted_request_metadata(&document_url, &parsed_current, &mode));
-        }
+        // Request metadata as Chrome sends it. Without these the wreq Chrome
+        // emulation fills in top-level navigation defaults (Accept: text/html,
+        // Sec-Fetch-Mode: navigate, Sec-Fetch-Site: none) on every request,
+        // including XHRs and script loads.
+        req_headers.extend(scripted_request_metadata(
+            &document_url,
+            &parsed_current,
+            &mode,
+            &destination,
+        ));
         for (k, v) in &current_headers {
             req_headers.insert(k.to_lowercase(), v.clone());
         }
@@ -3937,7 +3959,7 @@ mod tests {
     #[test]
     fn scripted_request_metadata_matches_chrome() {
         let get = |doc: &str, target: &str| -> std::collections::HashMap<String, String> {
-            super::scripted_request_metadata(doc, &url::Url::parse(target).unwrap(), "cors")
+            super::scripted_request_metadata(doc, &url::Url::parse(target).unwrap(), "cors", "")
                 .into_iter()
                 .collect()
         };
@@ -3952,6 +3974,18 @@ mod tests {
         let cross = get("https://a.example.com/p", "https://other.org/api");
         assert_eq!(cross["sec-fetch-site"], "cross-site");
         assert!(!get("https://a.example.com/p", "http://a.example.com/x").contains_key("referer"));
+        let script: std::collections::HashMap<String, String> = super::scripted_request_metadata(
+            "https://a.example.com/p",
+            &url::Url::parse("https://cdn.other.org/x.js").unwrap(),
+            "no-cors",
+            "script",
+        )
+        .into_iter()
+        .collect();
+        assert_eq!(script["sec-fetch-dest"], "script");
+        assert_eq!(script["sec-fetch-mode"], "no-cors");
+        assert_eq!(script["accept"], "*/*");
+        assert_eq!(script["sec-fetch-site"], "cross-site");
     }
 
     use super::{
