@@ -3572,8 +3572,16 @@ impl ObscuraJsRuntime {
     /// asleep waiting for it.
     #[doc(hidden)]
     pub async fn run_autonomous_event_loop_turn(&mut self) -> Result<bool, String> {
-        const AUTONOMOUS_TASK_WATCHDOG_MS: u64 =
-            SYNCHRONOUS_TASK_FLOOR_MS + WATCHDOG_SCHEDULING_MARGIN_MS;
+        // OBSCURA_TASK_BUDGET_MS raises the per-task cap for heavy anti-bot
+        // sensors, which run far slower here than in Chrome and would
+        // otherwise be terminated mid-computation.
+        static TASK_BUDGET_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        let task_budget_ms = *TASK_BUDGET_MS.get_or_init(|| {
+            std::env::var("OBSCURA_TASK_BUDGET_MS")
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(SYNCHRONOUS_TASK_FLOOR_MS + WATCHDOG_SCHEDULING_MARGIN_MS)
+        });
 
         #[cfg(feature = "render")]
         self.service_render_resources();
@@ -3581,7 +3589,7 @@ impl ObscuraJsRuntime {
 
         let checkpoint_watchdog = crate::cdp_watchdog::arm(
             self.isolate_handle(),
-            std::time::Duration::from_millis(AUTONOMOUS_TASK_WATCHDOG_MS),
+            std::time::Duration::from_millis(task_budget_ms),
         );
         self.runtime().v8_isolate().perform_microtask_checkpoint();
         if crate::cdp_watchdog::disarm(checkpoint_watchdog) {
@@ -3597,7 +3605,7 @@ impl ObscuraJsRuntime {
         let result = std::future::poll_fn(|cx| {
             let watchdog = crate::cdp_watchdog::arm(
                 isolate_handle.clone(),
-                std::time::Duration::from_millis(AUTONOMOUS_TASK_WATCHDOG_MS),
+                std::time::Duration::from_millis(task_budget_ms),
             );
             let tick = self
                 .runtime()

@@ -404,7 +404,7 @@ async function __runDynScriptTask(task) {
     // off the element. Calling onload separately would double-fire it.
     try { task.dispatchEvent(new Event('load')); } catch(e) {}
   } catch(e) {
-    console.error('Dynamic script fetch error:', e.message);
+    console.error('Dynamic script fetch error:', e.message, task.url);
     try { task.dispatchEvent(new Event('error')); } catch(ex) {}
   } finally {
     if (task.delaysLoad) {
