@@ -235,6 +235,11 @@ pub struct Page {
     /// separate from `url`: direct automation navigations have no referrer,
     /// while a navigation requested by page script uses the previous document.
     pub referrer: String,
+    /// Referrer for a script-requested navigation that the CDP server takes via
+    /// `take_pending_navigation` and replays as a synthetic Page.navigate. It is
+    /// consumed by the next `navigate_with_wait_post`, so that navigation keeps
+    /// the source document as initiator instead of looking typed ("none").
+    document_nav_referrer: std::cell::RefCell<Option<String>>,
     /// CSS viewport used by responsive page JavaScript and CDP screenshots.
     /// The physical `screen` fingerprint remains independent.
     pub viewport: (f32, f32),
@@ -1078,6 +1083,7 @@ impl Page {
             context,
             title: String::new(),
             referrer: String::new(),
+            document_nav_referrer: std::cell::RefCell::new(None),
             viewport: (1280.0, 720.0),
             screen_size_override: None,
             screen_metrics_emulated: false,
@@ -2975,10 +2981,11 @@ impl Page {
         // the automation request already has an explicit timeout.
         let nav_timeout = self.navigation_timeout();
         let nav_timeout_ms = duration_millis_u64(nav_timeout);
+        let referrer = self.document_nav_referrer.take().unwrap_or_default();
 
         let result = match tokio::time::timeout(
             nav_timeout,
-            self.navigate_with_wait_post_inner(url_str, wait_until, method, body, ""),
+            self.navigate_with_wait_post_inner(url_str, wait_until, method, body, &referrer),
         )
         .await
         {
@@ -3194,6 +3201,7 @@ impl Page {
         body: &str,
         initial_referrer: &str,
     ) -> Result<(), PageError> {
+        self.document_nav_referrer.take();
         let mut current_url = url_str.to_string();
         let mut current_method = method.to_string();
         let mut current_body = body.to_string();
@@ -4568,11 +4576,12 @@ impl Page {
     }
 
     pub fn take_pending_navigation(&self) -> Option<(String, String, String)> {
-        if let Some(js) = &self.js {
-            js.take_pending_navigation()
-        } else {
-            None
-        }
+        let pending = self.js.as_ref()?.take_pending_navigation()?;
+        let referrer = self.url.as_ref().and_then(|source| {
+            Url::parse(&pending.0).ok().map(|target| navigation_referrer(source, &target))
+        });
+        *self.document_nav_referrer.borrow_mut() = referrer;
+        Some(pending)
     }
 
     pub fn has_pending_navigation(&self) -> bool {
