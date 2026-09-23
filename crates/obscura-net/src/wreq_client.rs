@@ -361,6 +361,9 @@ impl StealthHttpClient {
                 req = req.header("Cookie", &cookie_header);
             }
 
+            if let Some(al) = crate::env_accept_language() {
+                req = req.header("accept-language", al);
+            }
             for (k, v) in self.extra_headers.read().await.iter() {
                 if k.eq_ignore_ascii_case("origin") {
                     continue;
@@ -514,6 +517,9 @@ impl StealthHttpClient {
             if !cookie_header.is_empty() {
                 req = req.header("cookie", &cookie_header);
             }
+        }
+        if let Some(al) = crate::env_accept_language() {
+            req = req.header("accept-language", al);
         }
         for (k, v) in self.extra_headers.read().await.iter() {
             req = req.header(k.as_str(), v.as_str());

@@ -576,7 +576,11 @@ impl ObscuraJsRuntime {
             // locale the other surfaces claim (#734). Process-global and
             // idempotent; setting it under the create lock guarantees it
             // lands before the first isolate exists.
-            deno_core::v8::icu::set_default_locale("en-US");
+            // OBSCURA_LANGUAGES moves all three surfaces together.
+            let locale = obscura_net::env_languages()
+                .and_then(|l| l.into_iter().next())
+                .unwrap_or_else(|| "en-US".to_string());
+            deno_core::v8::icu::set_default_locale(&locale);
 
             let mut runtime = JsRuntime::new(RuntimeOptions {
                 extensions: vec![build_extension()],
@@ -885,7 +889,8 @@ impl ObscuraJsRuntime {
     ) {
         use deno_core::v8;
 
-        const IDENTITY_GLOBALS: [&str; 7] = [
+        const IDENTITY_GLOBALS: [&str; 8] = [
+            "__obscura_languages",
             "__obscura_ua",
             "__obscura_platform",
             "__obscura_ua_platform",
@@ -1439,6 +1444,15 @@ impl ObscuraJsRuntime {
             "<set-stealth>",
             format!("globalThis.__obscura_stealth = {};", enabled),
         );
+        if let Some(languages) = obscura_net::env_languages() {
+            let _ = self.execute_runtime_script(
+                "<set-languages>",
+                format!(
+                    "globalThis.__obscura_languages = Object.freeze({});",
+                    serde_json::to_string(&languages).unwrap_or_else(|_| "[]".into())
+                ),
+            );
+        }
     }
 
     /// Set the CSS viewport exposed to page JavaScript. This must run before
