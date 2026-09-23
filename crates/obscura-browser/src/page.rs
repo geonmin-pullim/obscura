@@ -1694,17 +1694,28 @@ impl Page {
     }
 
     async fn do_fetch(&self, url: &Url) -> Result<Response, ObscuraNetError> {
+        // A navigation started by a document (link, form, location=) must carry
+        // that document as initiator and referrer, so sec-fetch-site/Referer
+        // read "same-origin" + the source URL like Chrome. Only typed/CDP
+        // navigations (empty referrer) are browser-initiated ("none").
+        // ponytail: an empty referrer from a no-referrer policy is also treated as
+        // browser-initiated; carry the source URL separately if that case matters.
+        let mut request = ResourceRequest::navigation();
+        if let Ok(source) = Url::parse(&self.referrer) {
+            request.initiator = Some(source.clone());
+            request.referrer = Some(source);
+        }
         #[cfg(feature = "stealth")]
         if let Some(ref stealth) = self.stealth_client {
             // Pass the page callbacks so CDP Network events and
             // page.on('request'/'response') observers fire for stealth-mode
             // navigations too, matching the non-stealth path below.
             return stealth
-                .fetch_with_callbacks(url, Some(&self.callbacks))
+                .fetch_resource_with_callbacks(url, request, Some(&self.callbacks))
                 .await;
         }
         self.http_client
-            .fetch_with_callbacks(url, Some(&self.callbacks))
+            .fetch_resource_with_callbacks(url, request, Some(&self.callbacks))
             .await
     }
     fn init_js(&mut self) {
