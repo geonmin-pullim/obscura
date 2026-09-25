@@ -6170,8 +6170,17 @@ fn op_canvas_paint_damage(state: &OpState, nid: u32) -> bool {
     connected
 }
 
+/// Milliseconds since the first call, from a monotonic clock with
+/// sub-millisecond resolution; backs performance.now().
+#[op2(fast)]
+fn op_high_res_time() -> f64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
+}
+
 pub fn build_extension() -> Extension {
     let mut ops = vec![
+        op_high_res_time(),
         op_dom(),
         op_script_mark_started(),
         op_script_try_start(),

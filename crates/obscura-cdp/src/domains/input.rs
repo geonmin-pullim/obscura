@@ -40,7 +40,7 @@ fn insert_text_js(text: &str) -> String {
                 var caret = lo + ins.length;\
                 t.setSelectionRange(caret, caret);\
             }}\
-            t.dispatchEvent(globalThis.__obscura_markTrusted(new Event('input', {{bubbles:true}})));\
+            t.dispatchEvent(globalThis.__obscura_markTrusted(new (globalThis.InputEvent || Event)('input', {{bubbles:true,composed:true,inputType:'insertText',data:{literal}}})));\
         }})()",
         text = literal,
     )
@@ -141,30 +141,11 @@ pub async fn handle(
                             if (!target) return;\
                             globalThis.__obscura_click_target = target;\
                             globalThis.__obscura_mouse_down = {{target:target,button:{button_code},clickCount:{click_count}}};\
-                            var previousTarget = globalThis.__obscura_mouse_over_target || null;\
-                            if (previousTarget !== target) {{\
-                                function ancestry(node) {{ var path=[]; while (node) {{ path.push(node); node=node.parentNode || null; }} return path; }}\
-                                function pointerEvent(node,type,bubbles,related) {{ node.dispatchEvent(globalThis.__obscura_markTrusted(new PointerEvent(type, {{bubbles:bubbles,cancelable:bubbles,composed:bubbles,view:globalThis,clientX:{x},clientY:{y},button:{button_code},buttons:{buttons},detail:0,pointerId:1,pointerType:'mouse',isPrimary:true,pressure:{pointer_pressure},relatedTarget:related,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}))); }}\
-                                function mouseEvent(node,type,bubbles,related) {{ node.dispatchEvent(globalThis.__obscura_markTrusted(new MouseEvent(type, {{bubbles:bubbles,cancelable:bubbles,composed:bubbles,view:globalThis,clientX:{x},clientY:{y},button:{button_code},buttons:{buttons},detail:0,relatedTarget:related,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}))); }}\
-                                var oldPath = previousTarget && previousTarget.isConnected ? ancestry(previousTarget) : [];\
-                                var newPath = ancestry(target);\
-                                var common = newPath.find(function(node) {{ return oldPath.includes(node); }}) || null;\
-                                var exited = common ? oldPath.slice(0, oldPath.indexOf(common)) : oldPath;\
-                                var entered = common ? newPath.slice(0, newPath.indexOf(common)) : newPath;\
-                                if (previousTarget && previousTarget.isConnected) pointerEvent(previousTarget,'pointerout',true,target);\
-                                for (var pi=0; pi<exited.length; pi++) pointerEvent(exited[pi],'pointerleave',false,target);\
-                                pointerEvent(target,'pointerover',true,previousTarget);\
-                                for (var pe=entered.length-1; pe>=0; pe--) pointerEvent(entered[pe],'pointerenter',false,previousTarget);\
-                                if (previousTarget && previousTarget.isConnected) mouseEvent(previousTarget,'mouseout',true,target);\
-                                for (var mi=0; mi<exited.length; mi++) mouseEvent(exited[mi],'mouseleave',false,target);\
-                                mouseEvent(target,'mouseover',true,previousTarget);\
-                                for (var me=entered.length-1; me>=0; me--) mouseEvent(entered[me],'mouseenter',false,previousTarget);\
-                                globalThis.__obscura_mouse_over_target = target;\
-                            }}\
+                            globalThis.__obscura_hoverTo(target,{x},{y},{buttons},{alt_key},{ctrl_key},{meta_key},{shift_key});\
                             var focusTarget = target.closest && target.closest('input,select,textarea,button,a[href],[tabindex],[contenteditable]');\
-                            var pointer = globalThis.__obscura_markTrusted(new PointerEvent('pointerdown', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},button:{button_code},buttons:{buttons},detail:0,pointerId:1,pointerType:'mouse',isPrimary:true,pressure:{pointer_pressure},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
+                            var pointer = globalThis.__obscura_markTrusted(new PointerEvent('pointerdown', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},screenX:{x}+(globalThis.screenX||0),screenY:{y}+(globalThis.screenY||0)+Math.max(0,(globalThis.outerHeight||0)-(globalThis.innerHeight||0)),button:{button_code},buttons:{buttons},detail:0,pointerId:1,pointerType:'mouse',isPrimary:true,pressure:{pointer_pressure},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
                             target.dispatchEvent(pointer);\
-                            var evt = globalThis.__obscura_markTrusted(new MouseEvent('mousedown', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},button:{button_code},buttons:{buttons},detail:{click_count},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
+                            var evt = globalThis.__obscura_markTrusted(new MouseEvent('mousedown', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},screenX:{x}+(globalThis.screenX||0),screenY:{y}+(globalThis.screenY||0)+Math.max(0,(globalThis.outerHeight||0)-(globalThis.innerHeight||0)),button:{button_code},buttons:{buttons},detail:{click_count},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
                             target.dispatchEvent(evt);\
                             if (focusTarget && !globalThis.__obscura_isDisabled(focusTarget)) focusTarget.focus();\
                         }})()",
@@ -189,9 +170,9 @@ pub async fn handle(
                             if (!target) return;\
                             var down = globalThis.__obscura_mouse_down;\
                             globalThis.__obscura_mouse_down = null;\
-                            var pointer = globalThis.__obscura_markTrusted(new PointerEvent('pointerup', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},button:{button_code},buttons:0,detail:0,pointerId:1,pointerType:'mouse',isPrimary:true,pressure:0,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
+                            var pointer = globalThis.__obscura_markTrusted(new PointerEvent('pointerup', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},screenX:{x}+(globalThis.screenX||0),screenY:{y}+(globalThis.screenY||0)+Math.max(0,(globalThis.outerHeight||0)-(globalThis.innerHeight||0)),button:{button_code},buttons:0,detail:0,pointerId:1,pointerType:'mouse',isPrimary:true,pressure:0,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
                             target.dispatchEvent(pointer);\
-                            var evt = globalThis.__obscura_markTrusted(new MouseEvent('mouseup', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},button:{button_code},buttons:0,detail:{click_count},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
+                            var evt = globalThis.__obscura_markTrusted(new MouseEvent('mouseup', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},screenX:{x}+(globalThis.screenX||0),screenY:{y}+(globalThis.screenY||0)+Math.max(0,(globalThis.outerHeight||0)-(globalThis.innerHeight||0)),button:{button_code},buttons:0,detail:{click_count},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
                             target.dispatchEvent(evt);\
                             if (!down || down.button !== {button_code} || {button_code} !== 0) return;\
                             var clickTarget = down.target;\
@@ -223,7 +204,7 @@ pub async fn handle(
                                 clickTarget.checked = !oldChecked;\
                                 clickTarget.indeterminate = false;\
                             }}\
-                            var click = globalThis.__obscura_markTrusted(new MouseEvent('click', {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},button:0,buttons:0,detail:{click_count},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
+                            var click = globalThis.__obscura_markTrusted(new PointerEvent('click', {{pointerId:1,pointerType:'mouse',isPrimary:true,bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},screenX:{x}+(globalThis.screenX||0),screenY:{y}+(globalThis.screenY||0)+Math.max(0,(globalThis.outerHeight||0)-(globalThis.innerHeight||0)),button:0,buttons:0,detail:{click_count},altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
                             var cancelled = !clickTarget.dispatchEvent(click);\
                             if (cancelled) {{\
                                 if (radioStates) {{\
@@ -298,6 +279,34 @@ pub async fn handle(
                         session_id: Some(session_id.clone().unwrap_or_default()),
                     });
                 }
+            } else if event_type == "mouseMoved" {
+                // Chrome turns a mouse move into pointer/mouse over-out-enter-leave
+                // transitions plus pointermove and mousemove with movementX/Y.
+                // Behavioural anti-bot sensors record exactly these.
+                if let Some(page) = ctx.get_session_page_mut(session_id) {
+                    let code = format!(
+                        "(function() {{\
+                            var target = (document.elementFromPoint && document.elementFromPoint({x},{y})) || document.body || document.documentElement;\
+                            if (!target) return;\
+                            var last = globalThis.__obscura_last_mouse || {{x:{x},y:{y}}};\
+                            globalThis.__obscura_last_mouse = {{x:{x},y:{y}}};\
+                            globalThis.__obscura_hoverTo(target,{x},{y},{buttons},{alt_key},{ctrl_key},{meta_key},{shift_key});\
+                            var init = {{bubbles:true,cancelable:true,composed:true,view:globalThis,clientX:{x},clientY:{y},screenX:{x}+(globalThis.screenX||0),screenY:{y}+(globalThis.screenY||0)+Math.max(0,(globalThis.outerHeight||0)-(globalThis.innerHeight||0)),movementX:{x}-last.x,movementY:{y}-last.y,button:0,buttons:{buttons},detail:0,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}};\
+                            var pinit = Object.assign({{}}, init, {{button:-1,pointerId:1,pointerType:'mouse',isPrimary:true,pressure:{pointer_pressure}}});\
+                            target.dispatchEvent(globalThis.__obscura_markTrusted(new PointerEvent('pointermove', pinit)));\
+                            target.dispatchEvent(globalThis.__obscura_markTrusted(new MouseEvent('mousemove', init)));\
+                        }})()",
+                        x = x,
+                        y = y,
+                        buttons = buttons,
+                        alt_key = alt_key,
+                        ctrl_key = ctrl_key,
+                        meta_key = meta_key,
+                        shift_key = shift_key,
+                        pointer_pressure = if buttons == 0 { 0.0 } else { 0.5 },
+                    );
+                    page.evaluate(&code);
+                }
             } else if event_type == "mouseWheel" {
                 let delta_x = params.get("deltaX").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let delta_y = params.get("deltaY").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -306,7 +315,7 @@ pub async fn handle(
                         "(function() {{\
                             var target = (document.elementFromPoint && document.elementFromPoint({x},{y})) || document.body || document.documentElement;\
                             if (!target) return;\
-                            var wheel = globalThis.__obscura_markTrusted(new WheelEvent('wheel', {{bubbles:true,cancelable:true,view:globalThis,clientX:{x},clientY:{y},deltaX:{delta_x},deltaY:{delta_y},deltaMode:0,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
+                            var wheel = globalThis.__obscura_markTrusted(new WheelEvent('wheel', {{bubbles:true,cancelable:true,view:globalThis,clientX:{x},clientY:{y},screenX:{x}+(globalThis.screenX||0),screenY:{y}+(globalThis.screenY||0)+Math.max(0,(globalThis.outerHeight||0)-(globalThis.innerHeight||0)),deltaX:{delta_x},deltaY:{delta_y},deltaMode:0,altKey:{alt_key},ctrlKey:{ctrl_key},metaKey:{meta_key},shiftKey:{shift_key}}}));\
                             if (!target.dispatchEvent(wheel)) return;\
                             var dx = {delta_x}, dy = {delta_y};\
                             var root = document.scrollingElement || document.documentElement || document.body;\
@@ -365,6 +374,10 @@ pub async fn handle(
             let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("");
             let code = params.get("code").and_then(|v| v.as_str()).unwrap_or("");
             let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let key_code = params
+                .get("windowsVirtualKeyCode")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
 
             if let Some(page) = ctx.get_session_page_mut(session_id) {
                 match event_type {
@@ -372,7 +385,7 @@ pub async fn handle(
                         let js = format!(
                             "(function() {{\
                                 var target = document.activeElement || document.body;\
-                                var evt = globalThis.__obscura_markTrusted(new KeyboardEvent('keydown', {{bubbles:true,cancelable:true,key:{key},code:{code}}}));\
+                                var evt = globalThis.__obscura_markTrusted(new KeyboardEvent('keydown', {{bubbles:true,cancelable:true,composed:true,view:globalThis,key:{key},code:{code},keyCode:{key_code},which:{key_code}}}));\
                                 target.dispatchEvent(evt);\
                             }})()",
                             // Escape backslash BEFORE single-quote (as the text
@@ -381,10 +394,19 @@ pub async fn handle(
                             // and produce a syntax error that drops the event.
                             key = js_str(key),
                             code = js_str(code),
+                            key_code = key_code,
                         );
                         page.evaluate(&js);
 
                         if !text.is_empty() && text != "\r" && text != "\n" {
+                            // Chrome fires keypress (charCode = the character) for printable keys.
+                            let ch = text.chars().next().map(|c| c as u32).unwrap_or(0);
+                            page.evaluate(&format!(
+                                "(function() {{ var t = document.activeElement || document.body; t.dispatchEvent(globalThis.__obscura_markTrusted(new KeyboardEvent('keypress', {{bubbles:true,cancelable:true,composed:true,view:globalThis,key:{key},code:{code},keyCode:{ch},charCode:{ch},which:{ch}}}))); }})()",
+                                key = js_str(key),
+                                code = js_str(code),
+                                ch = ch,
+                            ));
                             page.evaluate(&insert_text_js(text));
                         }
 
@@ -422,11 +444,12 @@ pub async fn handle(
                         let js = format!(
                             "(function() {{\
                                 var target = document.activeElement || document.body;\
-                                var evt = globalThis.__obscura_markTrusted(new KeyboardEvent('keyup', {{bubbles:true,key:{key},code:{code}}}));\
+                                var evt = globalThis.__obscura_markTrusted(new KeyboardEvent('keyup', {{bubbles:true,cancelable:true,composed:true,view:globalThis,key:{key},code:{code},keyCode:{key_code},which:{key_code}}}));\
                                 target.dispatchEvent(evt);\
                             }})()",
                             key = js_str(key),
                             code = js_str(code),
+                            key_code = key_code,
                         );
                         page.evaluate(&js);
                     }

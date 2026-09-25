@@ -33,6 +33,8 @@ const __obscuraCore = globalThis.Deno.core;
     '__obscura_hw', '__obscura_mem',
     '__documentReadyState__', '__currentUrl',
     // internal helpers (var-declared throughout the file)
+    '__obscura_click_target', '__obscura_mouse_down', '__obscura_mouse_over_target',
+    '__obscura_last_mouse', '__obscura_hoverTo',
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
@@ -11134,7 +11136,14 @@ globalThis.performance = globalThis.performance || {
     // faster than real elapsed time.
     var _last = -Infinity;
     return function() {
-      var ms = Date.now() - (globalThis.performance.timeOrigin || 0);
+      // Monotonic high-resolution clock anchored to this page's timeOrigin,
+      // coarsened to 100us like Chrome without cross-origin isolation.
+      // Integer-millisecond readings gave every event in a burst the same
+      // timeStamp, which behavioural sensors read as synthetic input.
+      var st = typeof _perfState === 'object' && _perfState;
+      var ms = st && st.hrOrigin !== undefined
+        ? Math.floor((__obscuraCore.ops.op_high_res_time() - st.hrOrigin) * 10) / 10
+        : Date.now() - (globalThis.performance.timeOrigin || 0);
       if (ms < _last) return _last;
       _last = ms;
       return _last;
@@ -16027,6 +16036,8 @@ var _perfState = null;
     var C = d && d.value;
     if (typeof C !== 'function' || !C.prototype || typeof C.prototype !== 'object') return;
     tag(C.prototype, k);
+    if (C.name !== k) Object.defineProperty(C, 'name', { value: k, configurable: true });
+    if (!_nativeFns.has(C) && !_nativeStr.has(C)) _markNativeAs(C, 'function ' + k + '() { [native code] }');
     var cd = Object.getOwnPropertyDescriptor(C.prototype, 'constructor');
     if (C.prototype.constructor !== C && (!cd || cd.configurable)) def(C.prototype, 'constructor', C);
   });
@@ -16200,6 +16211,33 @@ var _perfState = null;
   }
 })();
 
+// Pointer/mouse over-out-enter-leave transitions when the pointer moves onto
+// `target` (used by CDP Input mouse events).
+globalThis.__obscura_hoverTo = function(target, x, y, buttons, altKey, ctrlKey, metaKey, shiftKey) {
+  var previousTarget = globalThis.__obscura_mouse_over_target || null;
+  if (previousTarget === target) return;
+  var sx = x + (globalThis.screenX || 0);
+  var sy = y + (globalThis.screenY || 0) + Math.max(0, (globalThis.outerHeight || 0) - (globalThis.innerHeight || 0));
+  function ancestry(node) { var path = []; while (node) { path.push(node); node = node.parentNode || null; } return path; }
+  function init(bubbles, related) { return { bubbles: bubbles, cancelable: bubbles, composed: bubbles, view: globalThis, clientX: x, clientY: y, screenX: sx, screenY: sy, button: 0, buttons: buttons, detail: 0, relatedTarget: related, altKey: altKey, ctrlKey: ctrlKey, metaKey: metaKey, shiftKey: shiftKey }; }
+  function pointerEvent(node, type, bubbles, related) { node.dispatchEvent(globalThis.__obscura_markTrusted(new PointerEvent(type, Object.assign(init(bubbles, related), { button: -1, pointerId: 1, pointerType: 'mouse', isPrimary: true, pressure: buttons ? 0.5 : 0 })))); }
+  function mouseEvent(node, type, bubbles, related) { node.dispatchEvent(globalThis.__obscura_markTrusted(new MouseEvent(type, init(bubbles, related)))); }
+  var oldPath = previousTarget && previousTarget.isConnected ? ancestry(previousTarget) : [];
+  var newPath = ancestry(target);
+  var common = newPath.find(function(node) { return oldPath.includes(node); }) || null;
+  var exited = common ? oldPath.slice(0, oldPath.indexOf(common)) : oldPath;
+  var entered = common ? newPath.slice(0, newPath.indexOf(common)) : newPath;
+  if (previousTarget && previousTarget.isConnected) pointerEvent(previousTarget, 'pointerout', true, target);
+  for (var i = 0; i < exited.length; i++) pointerEvent(exited[i], 'pointerleave', false, target);
+  pointerEvent(target, 'pointerover', true, previousTarget);
+  for (var j = entered.length - 1; j >= 0; j--) pointerEvent(entered[j], 'pointerenter', false, previousTarget);
+  if (previousTarget && previousTarget.isConnected) mouseEvent(previousTarget, 'mouseout', true, target);
+  for (var k = 0; k < exited.length; k++) mouseEvent(exited[k], 'mouseleave', false, target);
+  mouseEvent(target, 'mouseover', true, previousTarget);
+  for (var m = entered.length - 1; m >= 0; m--) mouseEvent(entered[m], 'mouseenter', false, previousTarget);
+  globalThis.__obscura_mouse_over_target = target;
+};
+
 globalThis.__obscura_init = function() {
   // The host sets __obscura_frameId on a frame realm before calling this.
   _realmFrameId = globalThis.__obscura_frameId >>> 0;
@@ -16262,6 +16300,8 @@ globalThis.__obscura_init = function() {
   const t0 = Date.now() - 1 - Math.floor(_fpRand(641) * 100);
   var _perf = _perfState || globalThis.performance;
   _perf.timeOrigin = t0;
+  // Clock reading that corresponds to t0 on the high-resolution timeline.
+  if (_perfState) _perfState.hrOrigin = __obscuraCore.ops.op_high_res_time() - (Date.now() - t0);
   _perf.timing = { navigationStart: t0, domContentLoadedEventEnd: t0, loadEventEnd: t0 };
   var _totalHeap = 15000000 + Math.floor(_fpRand(620) * 85000000);
   _perf.memory = {
