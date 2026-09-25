@@ -34,6 +34,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__documentReadyState__', '__currentUrl',
     // internal helpers (var-declared throughout the file)
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
+    '_hoistMembers', '_perfState',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -13721,7 +13722,10 @@ HTMLCanvasElement.prototype.getContext = function getContext(type) {
   if (type === '2d') {
     if (this._gl) return null;
     if (!this._ctx) {
-      try { this._ctx = new _Canvas2D(this); }
+      try {
+        this._ctx = new _Canvas2D(this);
+        if (typeof CanvasRenderingContext2D === 'function') Object.setPrototypeOf(this._ctx, CanvasRenderingContext2D.prototype);
+      }
       catch (_error) { return null; }
     }
     return this._ctx;
@@ -14143,29 +14147,32 @@ navigator.scheduling = { isInputPending() { return false; } };
 // own props assigned above and the getters from the intermediate prototype hop
 // onto Navigator.prototype, so hasOwnProperty, getOwnPropertyNames and
 // getOwnPropertyDescriptor(Navigator.prototype, k) all look native.
+// Move an object's own members onto interface prototype P the way WebIDL
+// exposes them: methods as native-looking functions, everything else as
+// read-only native getters. Used for shims built as object literals.
+function _hoistMembers(obj, P) {
+  Object.getOwnPropertyNames(obj).forEach(function(k) {
+    var d = Object.getOwnPropertyDescriptor(obj, k);
+    if (d.get) {
+      _markNativeAs(d.get, 'function get ' + k + '() { [native code] }');
+      Object.defineProperty(P, k, { get: d.get, set: undefined, enumerable: true, configurable: true });
+    } else if (typeof d.value === 'function') {
+      _markNative(d.value);
+      Object.defineProperty(P, k, { value: d.value, writable: true, enumerable: true, configurable: true });
+    } else {
+      var v = d.value;
+      var g = _markNativeAs(function() { return v; }, 'function get ' + k + '() { [native code] }');
+      Object.defineProperty(P, k, { get: g, set: undefined, enumerable: true, configurable: true });
+    }
+  });
+}
+
 (function _hoistNavigator() {
   var nav = globalThis.navigator;
   var P = Navigator.prototype;
   var hop = Object.getPrototypeOf(nav);
-  function native(fn, str) { return str ? _markNativeAs(fn, str) : _markNative(fn); }
-  function hoist(obj) {
-    Object.getOwnPropertyNames(obj).forEach(function(k) {
-      var d = Object.getOwnPropertyDescriptor(obj, k);
-      if (d.get) {
-        native(d.get, 'function get ' + k + '() { [native code] }');
-        Object.defineProperty(P, k, { get: d.get, set: undefined, enumerable: true, configurable: true });
-      } else if (typeof d.value === 'function') {
-        native(d.value);
-        Object.defineProperty(P, k, { value: d.value, writable: true, enumerable: true, configurable: true });
-      } else {
-        var v = d.value;
-        var g = native(function() { return v; }, 'function get ' + k + '() { [native code] }');
-        Object.defineProperty(P, k, { get: g, set: undefined, enumerable: true, configurable: true });
-      }
-    });
-  }
-  if (hop !== P) hoist(hop);
-  hoist(nav);
+  if (hop !== P) _hoistMembers(hop, P);
+  _hoistMembers(nav, P);
   Object.getOwnPropertyNames(nav).forEach(function(k) { delete nav[k]; });
   Object.setPrototypeOf(nav, P);
   Object.defineProperty(P, Symbol.toStringTag, { value: 'Navigator', configurable: true });
@@ -15002,11 +15009,28 @@ if (!globalThis.crypto.subtle) {
 }
 
 if (typeof DOMRect === 'undefined') {
-  globalThis.DOMRect = class DOMRect {
-    constructor(x=0,y=0,w=0,h=0) { this.x=x;this.y=y;this.width=w;this.height=h;this.top=y;this.right=x+w;this.bottom=y+h;this.left=x; }
-    toJSON() { return {x:this.x,y:this.y,width:this.width,height:this.height,top:this.top,right:this.right,bottom:this.bottom,left:this.left}; }
-    static fromRect(r={}) { return new DOMRect(r.x,r.y,r.width,r.height); }
+  // Geometry lives in a side table and is read through prototype getters, as
+  // in Chrome, so a rect has no own enumerable properties.
+  const _rects = new WeakMap();
+  const _r = (o) => _rects.get(o) || [0, 0, 0, 0];
+  globalThis.DOMRectReadOnly = class DOMRectReadOnly {
+    constructor(x = 0, y = 0, w = 0, h = 0) { _rects.set(this, [+x, +y, +w, +h]); }
+    get x() { return _r(this)[0]; }
+    get y() { return _r(this)[1]; }
+    get width() { return _r(this)[2]; }
+    get height() { return _r(this)[3]; }
+    get top() { const r = _r(this); return Math.min(r[1], r[1] + r[3]); }
+    get right() { const r = _r(this); return Math.max(r[0], r[0] + r[2]); }
+    get bottom() { const r = _r(this); return Math.max(r[1], r[1] + r[3]); }
+    get left() { const r = _r(this); return Math.min(r[0], r[0] + r[2]); }
+    toJSON() { return { x: this.x, y: this.y, width: this.width, height: this.height, top: this.top, right: this.right, bottom: this.bottom, left: this.left }; }
+    static fromRect(r = {}) { return new this(r.x, r.y, r.width, r.height); }
   };
+  globalThis.DOMRect = class DOMRect extends DOMRectReadOnly {};
+  ['x', 'y', 'width', 'height'].forEach(function(k, i) {
+    const get = Object.getOwnPropertyDescriptor(DOMRectReadOnly.prototype, k).get;
+    Object.defineProperty(DOMRect.prototype, k, { get, set(v) { _r(this)[i] = +v; }, enumerable: true, configurable: true });
+  });
 }
 
 if (typeof DOMRectList === 'undefined') {
@@ -15861,6 +15885,225 @@ if (typeof ShadowRoot !== 'undefined' && !ShadowRoot.prototype.elementFromPoint)
   };
 }
 
+// Interface fidelity. In Chrome every platform object reports its WebIDL
+// interface through Object.prototype.toString (@@toStringTag on the
+// prototype), prototype.constructor and its prototype chain, and keeps its
+// members on the prototype. Fingerprinting scripts compare all of these;
+// obscura's shims mostly answered "[object Object]". Align them here, after
+// every shim is defined.
+var _perfState = null;
+(function _interfaceFidelity() {
+  var def = function(o, k, v) { Object.defineProperty(o, k, { value: v, writable: true, enumerable: false, configurable: true }); };
+  var tag = function(P, name) {
+    if (P && !Object.prototype.hasOwnProperty.call(P, Symbol.toStringTag))
+      Object.defineProperty(P, Symbol.toStringTag, { value: name, configurable: true });
+  };
+  // A WebIDL interface object: not constructible from script, native-looking.
+  var iface = function(name, parentProto) {
+    var C = globalThis[name];
+    if (typeof C !== 'function') {
+      C = { [name]: function() { throw new TypeError('Illegal constructor'); } }[name];
+      C.prototype = Object.create(parentProto || Object.prototype);
+      def(C.prototype, 'constructor', C);
+      _markNative(C);
+      def(globalThis, name, C);
+    }
+    tag(C.prototype, name);
+    return C;
+  };
+  // Turn a shim object literal into an instance of interface `name`.
+  var adopt = function(obj, name, parentProto) {
+    if (!obj || typeof obj !== 'object') return;
+    var C = iface(name, parentProto);
+    if (Object.getPrototypeOf(obj) === C.prototype) return;
+    _hoistMembers(obj, C.prototype);
+    Object.getOwnPropertyNames(obj).forEach(function(k) { delete obj[k]; });
+    Object.setPrototypeOf(obj, C.prototype);
+  };
+  var ET = typeof EventTarget === 'function' ? EventTarget.prototype : Object.prototype;
+
+  // 0. HTML element interfaces. Most HTML*Element globals were aliases of
+  //    Element, so every element reported "Element". Give HTMLElement and each
+  //    alias its own interface and re-parent created elements by tag name.
+  //    HTMLElement stays constructible from custom-element subclasses.
+  if (globalThis.HTMLElement === Element) {
+    var HE = function HTMLElement() {
+      if (!new.target || new.target === HE) throw new TypeError('Illegal constructor');
+      return Reflect.construct(Element, arguments, new.target);
+    };
+    HE.prototype = Object.create(Element.prototype);
+    def(HE.prototype, 'constructor', HE);
+    _markNative(HE);
+    def(globalThis, 'HTMLElement', HE);
+  }
+  var HEP = globalThis.HTMLElement.prototype;
+  Object.getOwnPropertyNames(globalThis).forEach(function(k) {
+    if (!/^HTML\w*Element$/.test(k) || k === 'HTMLElement') return;
+    var C = globalThis[k];
+    if (C === Element) { delete globalThis[k]; iface(k, HEP); }
+    else if (typeof C === 'function' && C.prototype && Object.getPrototypeOf(C.prototype) === Element.prototype) {
+      Object.setPrototypeOf(C.prototype, HEP);
+    }
+  });
+  // Form-control state lives on Element.prototype in obscura; Chrome defines it
+  // on each control's interface, and libraries (React) read the descriptor
+  // from there, e.g. Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').
+  [['HTMLInputElement', ['value', 'checked', 'defaultValue', 'defaultChecked', 'type', 'name', 'disabled', 'placeholder', 'required', 'readOnly', 'selectionStart', 'selectionEnd', 'files', 'form', 'indeterminate']],
+   ['HTMLTextAreaElement', ['value', 'defaultValue', 'name', 'disabled', 'placeholder', 'required', 'readOnly', 'selectionStart', 'selectionEnd', 'form']],
+   ['HTMLSelectElement', ['value', 'selectedIndex', 'options', 'multiple', 'name', 'disabled', 'required', 'form']],
+   ['HTMLOptionElement', ['value', 'selected', 'defaultSelected', 'text', 'label', 'disabled', 'index', 'form']],
+   ['HTMLButtonElement', ['value', 'type', 'name', 'disabled', 'form']],
+  ].forEach(function(e) {
+    var P = iface(e[0], HEP).prototype;
+    e[1].forEach(function(k) {
+      var d = Object.getOwnPropertyDescriptor(Element.prototype, k);
+      if (d && !Object.prototype.hasOwnProperty.call(P, k)) Object.defineProperty(P, k, d);
+    });
+  });
+  var TAG_IFACE = {
+    A: 'HTMLAnchorElement', AREA: 'HTMLAreaElement', BASE: 'HTMLBaseElement', BODY: 'HTMLBodyElement',
+    BR: 'HTMLBRElement', BUTTON: 'HTMLButtonElement', DATA: 'HTMLDataElement', DATALIST: 'HTMLDataListElement',
+    DETAILS: 'HTMLDetailsElement', DIALOG: 'HTMLDialogElement', DIV: 'HTMLDivElement', DL: 'HTMLDListElement',
+    EMBED: 'HTMLEmbedElement', FIELDSET: 'HTMLFieldSetElement', H1: 'HTMLHeadingElement', H2: 'HTMLHeadingElement',
+    H3: 'HTMLHeadingElement', H4: 'HTMLHeadingElement', H5: 'HTMLHeadingElement', H6: 'HTMLHeadingElement',
+    HEAD: 'HTMLHeadElement', HR: 'HTMLHRElement', HTML: 'HTMLHtmlElement', IFRAME: 'HTMLIFrameElement',
+    INPUT: 'HTMLInputElement', LABEL: 'HTMLLabelElement', LEGEND: 'HTMLLegendElement', LI: 'HTMLLIElement',
+    LINK: 'HTMLLinkElement', MAP: 'HTMLMapElement', META: 'HTMLMetaElement', METER: 'HTMLMeterElement',
+    OBJECT: 'HTMLObjectElement', OL: 'HTMLOListElement', OPTGROUP: 'HTMLOptGroupElement', OPTION: 'HTMLOptionElement',
+    OUTPUT: 'HTMLOutputElement', P: 'HTMLParagraphElement', PICTURE: 'HTMLPictureElement', PRE: 'HTMLPreElement',
+    PROGRESS: 'HTMLProgressElement', Q: 'HTMLQuoteElement', BLOCKQUOTE: 'HTMLQuoteElement', SCRIPT: 'HTMLScriptElement',
+    SELECT: 'HTMLSelectElement', SOURCE: 'HTMLSourceElement', SPAN: 'HTMLSpanElement', STYLE: 'HTMLStyleElement',
+    TABLE: 'HTMLTableElement', CAPTION: 'HTMLTableCaptionElement', COL: 'HTMLTableColElement', COLGROUP: 'HTMLTableColElement',
+    TBODY: 'HTMLTableSectionElement', THEAD: 'HTMLTableSectionElement', TFOOT: 'HTMLTableSectionElement',
+    TD: 'HTMLTableCellElement', TH: 'HTMLTableCellElement', TR: 'HTMLTableRowElement', TEMPLATE: 'HTMLTemplateElement',
+    TIME: 'HTMLTimeElement', TITLE: 'HTMLTitleElement', UL: 'HTMLUListElement', MENU: 'HTMLMenuElement',
+  };
+  // Tags Chrome implements as plain HTMLElement; anything else unknown is HTMLUnknownElement.
+  var PLAIN = /^(ABBR|ADDRESS|ARTICLE|ASIDE|B|BDI|BDO|CITE|CODE|DD|DFN|DT|EM|FIGCAPTION|FIGURE|FOOTER|HEADER|HGROUP|I|KBD|MAIN|MARK|NAV|NOSCRIPT|RP|RT|RUBY|S|SAMP|SEARCH|SECTION|SMALL|STRONG|SUB|SUMMARY|SUP|U|VAR|WBR|CENTER|ACRONYM|BIG|NOBR|TT|STRIKE|NOFRAMES|PLAINTEXT|NOEMBED)$/;
+  var XHTML = 'http://www.w3.org/1999/xhtml';
+  var reparent = function(n) {
+    if (!n || Object.getPrototypeOf(n) !== Element.prototype) return n;
+    var tagName;
+    try { if (n.namespaceURI !== XHTML) return n; tagName = String(n.tagName).toUpperCase(); } catch (e) { return n; }
+    var name = TAG_IFACE[tagName];
+    var P = name ? iface(name, HEP).prototype
+      : (PLAIN.test(tagName) || tagName.indexOf('-') > 0) ? HEP
+      : iface('HTMLUnknownElement', HEP).prototype;
+    Object.setPrototypeOf(n, P);
+    return n;
+  };
+  var origWrap = _wrap, origWrapEl = _wrapEl;
+  _wrap = function(nid) { return reparent(origWrap(nid)); };
+  _wrapEl = function(nid) { return reparent(origWrapEl(nid)); };
+  globalThis._wrap = _wrap;
+  ['createElement', 'createElementNS'].forEach(function(m) {
+    var orig = Document.prototype[m];
+    if (typeof orig !== 'function') return;
+    def(Document.prototype, m, _markNativeAs({ [m]: function() { return reparent(orig.apply(this, arguments)); } }[m],
+      'function ' + m + '() { [native code] }'));
+  });
+
+  // 1. Tags and constructor links for every exposed interface. ECMAScript
+  //    builtins are skipped: their class strings come from internal slots.
+  //    Image/Audio/Option are legacy factories sharing another prototype.
+  var BUILTIN = /Error$|^(Object|Function|Array|Number|Boolean|String|Symbol|Date|RegExp|Proxy|Iterator|AsyncIterator|Image|Audio|Option)$|Array$/;
+  Object.getOwnPropertyNames(globalThis).forEach(function(k) {
+    if (!/^[A-Z]/.test(k) || BUILTIN.test(k)) return;
+    var d = Object.getOwnPropertyDescriptor(globalThis, k);
+    var C = d && d.value;
+    if (typeof C !== 'function' || !C.prototype || typeof C.prototype !== 'object') return;
+    tag(C.prototype, k);
+    var cd = Object.getOwnPropertyDescriptor(C.prototype, 'constructor');
+    if (C.prototype.constructor !== C && (!cd || cd.configurable)) def(C.prototype, 'constructor', C);
+  });
+
+  // 2. document is an HTMLDocument (re-applied per page in __obscura_init).
+  iface('HTMLDocument', Document.prototype);
+
+  // 3. The global object is a Window, and Window is an EventTarget.
+  if (typeof Window === 'function') {
+    if (Object.getPrototypeOf(Window.prototype) === Object.prototype) Object.setPrototypeOf(Window.prototype, ET);
+    tag(Window.prototype, 'Window');
+    try { Object.setPrototypeOf(globalThis, Window.prototype); } catch (e) {}
+  }
+
+  // 4. performance: members on Performance.prototype; per-page values read
+  //    from _perfState, which __obscura_init updates.
+  var perf = globalThis.performance;
+  if (perf && Object.getPrototypeOf(perf) === Object.prototype) {
+    var Perf = iface('Performance', ET);
+    _perfState = { timeOrigin: perf.timeOrigin, timing: perf.timing, navigation: perf.navigation, memory: perf.memory };
+    Object.keys(_perfState).forEach(function(k) {
+      delete perf[k];
+      Object.defineProperty(Perf.prototype, k, {
+        get: _markNativeAs(function() { return _perfState[k]; }, 'function get ' + k + '() { [native code] }'),
+        set: undefined, enumerable: true, configurable: true,
+      });
+    });
+    adopt(perf, 'Performance', ET);
+  }
+
+  // 5. Rects are DOMRects.
+  [globalThis.Element, globalThis.Range].forEach(function(C) {
+    var P = C && C.prototype;
+    var orig = P && P.getBoundingClientRect;
+    if (!orig || typeof DOMRect !== 'function') return;
+    def(P, 'getBoundingClientRect', _markNativeAs(function getBoundingClientRect() {
+      var r = orig.call(this);
+      if (r instanceof DOMRect) return r;
+      var d = new DOMRect(r.x !== undefined ? r.x : r.left, r.y !== undefined ? r.y : r.top, r.width, r.height);
+      // Engine-internal hints read by scrollIntoView/hit testing (non-enumerable, as before).
+      ['__obscuraViewportFixed', '__obscuraPointerEventsNone'].forEach(function(k) {
+        if (k in r) Object.defineProperty(d, k, { value: r[k], enumerable: false });
+      });
+      return d;
+    }, 'function getBoundingClientRect() { [native code] }'));
+  });
+
+  // 6. The 2D context's methods live on CanvasRenderingContext2D.prototype;
+  //    getContext re-parents each context onto it.
+  if (typeof _Canvas2D === 'function' && typeof CanvasRenderingContext2D === 'function') {
+    Object.getOwnPropertyNames(_Canvas2D.prototype).forEach(function(k) {
+      if (k === 'constructor' || Object.prototype.hasOwnProperty.call(CanvasRenderingContext2D.prototype, k)) return;
+      var d = Object.getOwnPropertyDescriptor(_Canvas2D.prototype, k);
+      if (typeof d.value === 'function') _markNative(d.value);
+      if (d.get) _markNativeAs(d.get, 'function get ' + k + '() { [native code] }');
+      if (d.set) _markNativeAs(d.set, 'function set ' + k + '() { [native code] }');
+      Object.defineProperty(CanvasRenderingContext2D.prototype, k, d);
+    });
+  }
+
+  // 7. navigator's sub-objects are instances of their own interfaces.
+  var nav = globalThis.navigator;
+  if (nav) {
+    [['permissions', 'Permissions', Object.prototype], ['mediaDevices', 'MediaDevices', ET],
+     ['storage', 'StorageManager', Object.prototype], ['userAgentData', 'NavigatorUAData', Object.prototype],
+     ['clipboard', 'Clipboard', ET], ['credentials', 'CredentialsContainer', Object.prototype],
+     ['geolocation', 'Geolocation', Object.prototype], ['mediaCapabilities', 'MediaCapabilities', Object.prototype],
+     ['locks', 'LockManager', Object.prototype], ['keyboard', 'Keyboard', Object.prototype],
+     ['gpu', 'GPU', Object.prototype], ['wakeLock', 'WakeLock', Object.prototype],
+     ['bluetooth', 'Bluetooth', ET], ['usb', 'USB', ET], ['hid', 'HID', ET], ['serial', 'Serial', ET],
+     ['scheduling', 'Scheduling', Object.prototype], ['serviceWorker', 'ServiceWorkerContainer', ET],
+    ].forEach(function(e) { try { adopt(nav[e[0]], e[1], e[2]); } catch (err) {} });
+  }
+  if (globalThis.speechSynthesis) adopt(globalThis.speechSynthesis, 'SpeechSynthesis', ET);
+  // Absent in obscura but read by fingerprinters; values match desktop Chrome.
+  if (!('crossOriginIsolated' in globalThis)) {
+    Object.defineProperty(globalThis, 'crossOriginIsolated', {
+      get: _markNativeAs(function() { return false; }, 'function get crossOriginIsolated() { [native code] }'),
+      enumerable: true, configurable: true,
+    });
+  }
+  if (nav && !('appCodeName' in nav)) {
+    [['appCodeName', 'Mozilla'], ['appName', 'Netscape']].forEach(function(e) {
+      Object.defineProperty(Navigator.prototype, e[0], {
+        get: _markNativeAs(function() { return e[1]; }, 'function get ' + e[0] + '() { [native code] }'),
+        enumerable: true, configurable: true,
+      });
+    });
+  }
+})();
+
 globalThis.__obscura_init = function() {
   // The host sets __obscura_frameId on a frame realm before calling this.
   _realmFrameId = globalThis.__obscura_frameId >>> 0;
@@ -15879,6 +16122,7 @@ globalThis.__obscura_init = function() {
 
   const documentNid = +_dom("document_node_id");
   globalThis.document = new Document(documentNid);
+  if (typeof HTMLDocument === 'function') Object.setPrototypeOf(globalThis.document, HTMLDocument.prototype);
   // parentNode on <html> reaches the backing document node. Keep that wrapper
   // canonical so getRootNode(), isConnected, and identity comparisons return
   // the same Document object exposed as globalThis.document.
@@ -15917,10 +16161,11 @@ globalThis.__obscura_init = function() {
   // A navigation start precedes the wall clock, so skew into the past only: an
   // origin ahead of it makes performance.now() and the rAF timestamp negative.
   const t0 = Date.now() - 1 - Math.floor(_fpRand(641) * 100);
-  globalThis.performance.timeOrigin = t0;
-  globalThis.performance.timing = { navigationStart: t0, domContentLoadedEventEnd: t0, loadEventEnd: t0 };
+  var _perf = _perfState || globalThis.performance;
+  _perf.timeOrigin = t0;
+  _perf.timing = { navigationStart: t0, domContentLoadedEventEnd: t0, loadEventEnd: t0 };
   var _totalHeap = 15000000 + Math.floor(_fpRand(620) * 85000000);
-  globalThis.performance.memory = {
+  _perf.memory = {
     jsHeapSizeLimit: 4294705152,
     totalJSHeapSize: _totalHeap,
     usedJSHeapSize: Math.floor(_totalHeap * (0.3 + _fpRand(621) * 0.5)),
