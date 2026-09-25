@@ -21,7 +21,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__obscura_errors', '__obscura_init', '__obscura_hide_list',
     '__obscura_objects', '__obscura_oid', '__obscura_ua',
     '__obscura_platform', '__obscura_ua_platform', '__obscura_ua_platform_version',
-    '__obscura_stealth', '__obscura_languages', '__obscura_markTrusted', '__obscura_core_handoff',
+    '__obscura_stealth', '__obscura_languages', '__obscura_fp_seed', '__obscura_markTrusted', '__obscura_core_handoff',
     '__obscura_frameId', '__obscura_parentFrameId', '__obscura_frameWindows',
     '__obscura_frameObjects', '__obscura_frameElements', '__obscura_deliverMessage',
     '__obscura_liveFrameIds', '__obscura_forgetFrame',
@@ -16208,7 +16208,10 @@ globalThis.__obscura_init = function() {
   // from pages that are not cross-origin isolated.
   if (!globalThis.crossOriginIsolated) delete globalThis.SharedArrayBuffer;
   for (const queue of _browserPostedTaskQueues) _browserPostedTaskDiscardQueue(queue);
-  _fpSeed = Date.now() ^ (Math.random() * 0xFFFFFFFF >>> 0);
+  // One seed per browser context (set by the host in stealth mode), so the
+  // fingerprint is stable across navigations; otherwise a fresh one per page.
+  _fpSeed = globalThis.__obscura_fp_seed !== undefined ? (globalThis.__obscura_fp_seed | 0)
+    : Date.now() ^ (Math.random() * 0xFFFFFFFF >>> 0);
   _fpCache = null;
   // A real navigation just completed (this runs after set_url), so drop any
   // URL a location setter previewed synchronously and let document_url drive

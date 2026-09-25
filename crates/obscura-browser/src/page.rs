@@ -143,6 +143,24 @@ fn subresource_allowed(page_url: Option<&Url>, resource: &str) -> bool {
 /// for a document-initiated navigation. Direct navigations bypass this helper
 /// and use an empty referrer. Referrer-Policy overrides are not yet plumbed
 /// through the navigation request.
+/// Stealth fingerprint seed for a browser context: stable for the context's
+/// lifetime (so canvas noise, GPU, cores and memory stay the same across its
+/// navigations, like one real machine), different per context and per process.
+fn context_fingerprint_seed(context_id: &str) -> u32 {
+    use std::hash::{Hash, Hasher};
+    static PROCESS_SALT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let salt = *PROCESS_SALT.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        nanos ^ u64::from(std::process::id()).rotate_left(32)
+    });
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (salt, context_id).hash(&mut h);
+    (h.finish() & 0xFFFF_FFFF) as u32
+}
+
 fn navigation_referrer(source: &Url, target: &Url) -> String {
     if !matches!(source.scheme(), "http" | "https")
         || !matches!(target.scheme(), "http" | "https")
@@ -1762,6 +1780,7 @@ impl Page {
         #[cfg(feature = "stealth")]
         if self.stealth_client.is_some() {
             rt.set_stealth(true);
+            rt.set_fingerprint_seed(context_fingerprint_seed(&self.context.id));
             rt.set_user_agent(obscura_net::STEALTH_USER_AGENT);
             rt.set_platform(
                 obscura_net::STEALTH_NAVIGATOR_PLATFORM,

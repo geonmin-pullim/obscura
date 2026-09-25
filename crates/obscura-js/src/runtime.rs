@@ -889,7 +889,8 @@ impl ObscuraJsRuntime {
     ) {
         use deno_core::v8;
 
-        const IDENTITY_GLOBALS: [&str; 8] = [
+        const IDENTITY_GLOBALS: [&str; 9] = [
+            "__obscura_fp_seed",
             "__obscura_languages",
             "__obscura_ua",
             "__obscura_platform",
@@ -1436,6 +1437,14 @@ impl ObscuraJsRuntime {
                 js_string_literal(ua_platform),
                 js_string_literal(ua_platform_version),
             ),
+        );
+    }
+
+    /// Per-context seed for the stealth fingerprint (see __obscura_init).
+    pub fn set_fingerprint_seed(&mut self, seed: u32) {
+        let _ = self.execute_runtime_script(
+            "<set-fp-seed>",
+            format!("globalThis.__obscura_fp_seed = {};", seed),
         );
     }
 
