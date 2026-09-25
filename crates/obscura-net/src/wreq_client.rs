@@ -73,6 +73,30 @@ pub const STEALTH_UA_PLATFORM: &str = "Windows";
 pub const STEALTH_UA_PLATFORM_VERSION: &str = "15.0.0";
 
 #[cfg(feature = "stealth")]
+/// Chrome's request-header order (HTTP/2, after the pseudo-headers). Top-level
+/// and iframe navigations use one order; fetch/XHR and subresources another.
+/// Without this, wreq sends the emulation defaults first and appends every
+/// header obscura adds (referer, origin, sec-fetch-user, ...) at the end,
+/// an order no real Chrome produces.
+#[cfg(feature = "stealth")]
+fn chrome_header_order(navigation: bool) -> wreq::header::OrigHeaderMap {
+    const NAV: &[&str] = &[
+        "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "upgrade-insecure-requests",
+        "user-agent", "accept", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-user",
+        "sec-fetch-dest", "referer", "accept-encoding", "accept-language", "cookie", "priority",
+    ];
+    const SUB: &[&str] = &[
+        "content-length", "sec-ch-ua-platform", "user-agent", "sec-ch-ua", "content-type",
+        "sec-ch-ua-mobile", "accept", "origin", "sec-fetch-site", "sec-fetch-mode",
+        "sec-fetch-dest", "referer", "accept-encoding", "accept-language", "cookie", "priority",
+    ];
+    let mut order = wreq::header::OrigHeaderMap::new();
+    for name in if navigation { NAV } else { SUB } {
+        order.insert(*name);
+    }
+    order
+}
+
 fn tracker_blocking_enabled(value: Option<&str>) -> bool {
     !matches!(
         value.map(str::trim),
@@ -330,11 +354,16 @@ impl StealthHttpClient {
             validate_request_mode(&request, &current_url)?;
             let mut req = self.client.get(current_url.as_str());
 
+            let navigation = request.mode == RequestMode::Navigate;
             req = req
+                .orig_headers(chrome_header_order(navigation))
                 .header("accept", request.accept())
                 .header("sec-fetch-site", request_fetch_site(&request, &current_url))
                 .header("sec-fetch-mode", request.mode.header_value())
                 .header("sec-fetch-dest", request.destination());
+            if !navigation {
+                req = req.header("priority", "u=1, i");
+            }
             if request.mode == RequestMode::Navigate {
                 req = req
                     .header("upgrade-insecure-requests", "1")
@@ -523,6 +552,14 @@ impl StealthHttpClient {
         }
         for (k, v) in self.extra_headers.read().await.iter() {
             req = req.header(k.as_str(), v.as_str());
+        }
+        let navigation = matches!(
+            headers.get("sec-fetch-dest").map(String::as_str),
+            Some("document") | Some("iframe")
+        );
+        req = req.orig_headers(chrome_header_order(navigation));
+        if !navigation {
+            req = req.header("priority", "u=1, i");
         }
         for (k, v) in headers.iter() {
             req = req.header(k.as_str(), v.as_str());
