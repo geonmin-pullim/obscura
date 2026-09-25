@@ -2858,7 +2858,10 @@ impl Page {
         if let Some(js) = &mut self.js {
             let _ = js.execute_script(
                 "<ready-state-interactive>",
-                "globalThis.__documentReadyState__ = 'interactive';",
+                // Each readyState change fires readystatechange on the document;
+                // scripts (e.g. anti-bot sensors) wait on it to start work.
+                "globalThis.__documentReadyState__ = 'interactive';\n\
+                 try { const rs = new Event('readystatechange', {bubbles:false,cancelable:false}); if (typeof document.onreadystatechange === 'function') { try { document.onreadystatechange.call(document, rs); } catch(e) {} } document.dispatchEvent(rs); } catch(e) {}",
             );
         }
 
@@ -2961,12 +2964,18 @@ impl Page {
             let _ = js.execute_script(
                 "<load-event>",
                 "globalThis.__documentReadyState__ = 'complete';\n\
+                 try { const rs = new Event('readystatechange', {bubbles:false,cancelable:false}); if (typeof document.onreadystatechange === 'function') { try { document.onreadystatechange.call(document, rs); } catch(e) {} } document.dispatchEvent(rs); } catch(e) {}\n\
                  try {\n\
                    const loadEvent = new Event('load', {bubbles:false,cancelable:false});\n\
                    if (typeof window.onload === 'function') {\n\
                      try { window.onload.call(window, loadEvent); } catch(e) {}\n\
                    }\n\
                    try { window.dispatchEvent(loadEvent); } catch(e) {}\n\
+                 } catch(e) {}\n\
+                 try {\n\
+                   const ps = new (globalThis.PageTransitionEvent || Event)('pageshow', {bubbles:false,cancelable:false,persisted:false});\n\
+                   if (typeof window.onpageshow === 'function') { try { window.onpageshow.call(window, ps); } catch(e) {} }\n\
+                   window.dispatchEvent(ps);\n\
                  } catch(e) {}",
             );
         }

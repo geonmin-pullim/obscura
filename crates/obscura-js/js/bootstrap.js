@@ -16436,6 +16436,15 @@ var _perfState = null;
 
 // Pointer/mouse over-out-enter-leave transitions when the pointer moves onto
 // `target` (used by CDP Input mouse events).
+// pageshow/pagehide event type (persisted is false: no back/forward cache).
+if (typeof PageTransitionEvent === 'undefined') {
+  globalThis.PageTransitionEvent = class PageTransitionEvent extends Event {
+    #persisted;
+    constructor(type, init = {}) { super(type, init); this.#persisted = !!init.persisted; }
+    get persisted() { return this.#persisted; }
+  };
+}
+
 globalThis.__obscura_hoverTo = function(target, x, y, buttons, altKey, ctrlKey, metaKey, shiftKey) {
   var previousTarget = globalThis.__obscura_mouse_over_target || null;
   if (previousTarget === target) return;
