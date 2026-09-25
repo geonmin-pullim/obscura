@@ -589,6 +589,24 @@ impl ObscuraJsRuntime {
                 ..Default::default()
             });
 
+            // deno_core installs a PrepareStackTraceCallback that rebuilds every
+            // frame from Rust (callsite method calls, source-map lookups), making
+            // Error.stack ~20x slower than Chrome. Anti-bot challenges that build
+            // many stacks stalled the page for ~11 s. Clear it so V8 formats
+            // stacks natively, as Chrome does.
+            unsafe extern "C" {
+                fn v8__Isolate__SetPrepareStackTraceCallback(
+                    isolate: deno_core::v8::UnsafeRawIsolatePtr,
+                    callback: *const std::ffi::c_void,
+                );
+            }
+            unsafe {
+                v8__Isolate__SetPrepareStackTraceCallback(
+                    runtime.v8_isolate().as_raw_isolate_ptr(),
+                    std::ptr::null(),
+                );
+            }
+
             {
                 let op_state = runtime.op_state();
                 let mut op_state = op_state.borrow_mut();
