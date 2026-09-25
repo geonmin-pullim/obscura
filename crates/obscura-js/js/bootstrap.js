@@ -7321,6 +7321,10 @@ var _GL2 = {
   MAX_FRAGMENT_UNIFORM_BLOCKS: 0x8A2D, MAX_UNIFORM_BUFFER_BINDINGS: 0x8A2F, MAX_VERTEX_UNIFORM_COMPONENTS: 0x8B4A,
   MAX_FRAGMENT_UNIFORM_COMPONENTS: 0x8B49, MAX_VERTEX_OUTPUT_COMPONENTS: 0x9122, MAX_FRAGMENT_INPUT_COMPONENTS: 0x9125,
   MAX_ELEMENT_INDEX: 0x8D6B, MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS: 0x8C8B,
+  MAX_TEXTURE_LOD_BIAS: 0x84FD, MIN_PROGRAM_TEXEL_OFFSET: 0x8904, MAX_PROGRAM_TEXEL_OFFSET: 0x8905,
+  UNIFORM_BUFFER_OFFSET_ALIGNMENT: 0x8A34, MAX_VARYING_COMPONENTS: 0x8B4B,
+  MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS: 0x8C8A, MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS: 0x8C80,
+  MAX_ELEMENTS_VERTICES: 0x80E8, MAX_ELEMENTS_INDICES: 0x80E9, MAX_SERVER_WAIT_TIMEOUT: 0x9111,
 };
 var _GL_PARAMS = {
   0x0D33: 16384, 0x851C: 16384, 0x84E8: 16384, 0x8869: 16, 0x8DFB: 4096, 0x8DFD: 1024, 0x8DFC: 30,
@@ -7329,8 +7333,10 @@ var _GL_PARAMS = {
 };
 var _GL2_PARAMS = {
   0x8073: 2048, 0x88FF: 2048, 0x8824: 8, 0x8CDF: 8, 0x8D57: 16, 0x8A30: 65536, 0x8A2F: 24, 0x8A2B: 12,
-  0x8A2D: 12, 0x8A2E: 24, 0x8B49: 4096, 0x8B4A: 16384, 0x9122: 64, 0x9125: 124, 0x8C8A: 4, 0x8C8B: 4, 0x8C80: 64,
+  0x8A2D: 12, 0x8A2E: 24, 0x8B49: 4096, 0x8B4A: 16384, 0x9122: 120, 0x9125: 120, 0x8C8A: 4, 0x8C8B: 4, 0x8C80: 64,
   0x8D6B: 4294967295, 0x9111: 0, 0x8B8B: 0x8B8B,
+  0x84FD: 15, 0x8904: -8, 0x8905: 7, 0x8A34: 256, 0x8B4B: 120, 0x8C8A: 128, 0x8C8B: 4, 0x8C80: 4,
+  0x80E8: 2147483647, 0x80E9: 2147483647,
 };
 var _GL_EXT = ['ANGLE_instanced_arrays', 'EXT_blend_minmax', 'EXT_clip_control', 'EXT_color_buffer_half_float',
   'EXT_depth_clamp', 'EXT_disjoint_timer_query', 'EXT_float_blend', 'EXT_frag_depth', 'EXT_polygon_offset_clamp',
@@ -7359,6 +7365,14 @@ function _makeGLClass(name, v2) {
   var consts = v2 ? Object.assign({}, _GL, _GL2) : _GL;
   Object.keys(consts).forEach(function(k) { C[k] = consts[k]; P[k] = consts[k]; });
   function m(n, fn) { P[n] = _markNative(fn); Object.defineProperty(P[n], 'name', { value: n }); }
+  // Chrome's interface name for an extension object, e.g. WEBGL_lose_context ->
+  // WebGLLoseContext, EXT_texture_filter_anisotropic -> EXTTextureFilterAnisotropic.
+  function extIface(n) {
+    var m = /^(WEBGL|EXT|OES|KHR|ANGLE|OVR|NV)_(.*)$/.exec(n);
+    if (!m) return n;
+    var camel = m[2].split('_').map(function(w) { return /^(s3tc|srgb|etc1|pvrtc|astc|bptc|rgtc|lod)$/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1); }).join('');
+    return (m[1] === 'WEBGL' ? 'WebGL' : m[1]) + camel;
+  }
   function obj(tag) { var o = {}; Object.defineProperty(o, Symbol.toStringTag, { value: tag }); return o; }
   m('getParameter', function(p) {
     switch (p) {
@@ -7380,10 +7394,10 @@ function _makeGLClass(name, v2) {
   m('getSupportedExtensions', function() { return (v2 ? _GL2_EXT : _GL_EXT).slice(); });
   m('getExtension', function(n) {
     if ((v2 ? _GL2_EXT : _GL_EXT).indexOf(n) < 0) return null;
-    if (n === 'WEBGL_debug_renderer_info') { var e = obj('WEBGL_debug_renderer_info'); e.UNMASKED_VENDOR_WEBGL = 0x9245; e.UNMASKED_RENDERER_WEBGL = 0x9246; return e; }
-    if (n === 'EXT_texture_filter_anisotropic') { var a = obj('EXT_texture_filter_anisotropic'); a.TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE; a.MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF; return a; }
-    if (n === 'WEBGL_lose_context') { var l = obj('WEBGL_lose_context'); l.loseContext = function() {}; l.restoreContext = function() {}; return l; }
-    return obj(n);
+    if (n === 'WEBGL_debug_renderer_info') { var e = obj(extIface(n)); e.UNMASKED_VENDOR_WEBGL = 0x9245; e.UNMASKED_RENDERER_WEBGL = 0x9246; return e; }
+    if (n === 'EXT_texture_filter_anisotropic') { var a = obj(extIface(n)); a.TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE; a.MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF; return a; }
+    if (n === 'WEBGL_lose_context') { var l = obj(extIface(n)); l.loseContext = function() {}; l.restoreContext = function() {}; return l; }
+    return obj(extIface(n));
   });
   m('getShaderPrecisionFormat', function(shaderType, precisionType) {
     var f = obj('WebGLShaderPrecisionFormat');
@@ -16094,6 +16108,88 @@ var _perfState = null;
       enumerable: true, configurable: true,
     });
   }
+  // 7b. measureText returns a TextMetrics; performance.memory is a MemoryInfo;
+  //     navigator.mediaSession exists.
+  if (typeof CanvasRenderingContext2D === 'function' && CanvasRenderingContext2D.prototype.measureText) {
+    var TM = iface('TextMetrics').prototype;
+    var tmState = new WeakMap();
+    ['width', 'actualBoundingBoxLeft', 'actualBoundingBoxRight', 'fontBoundingBoxAscent', 'fontBoundingBoxDescent',
+     'actualBoundingBoxAscent', 'actualBoundingBoxDescent', 'emHeightAscent', 'emHeightDescent',
+     'hangingBaseline', 'alphabeticBaseline', 'ideographicBaseline'].forEach(function(k) {
+      Object.defineProperty(TM, k, { get: _markNativeAs(function() { var st = tmState.get(this); return st ? st[k] : undefined; },
+        'function get ' + k + '() { [native code] }'), enumerable: true, configurable: true });
+    });
+    var mt = CanvasRenderingContext2D.prototype.measureText;
+    def(CanvasRenderingContext2D.prototype, 'measureText', _markNativeAs(({ measureText(text) {
+      var m = mt.call(this, text);
+      var size = parseFloat(this.font) || 10;
+      var asc = m.actualBoundingBoxAscent, desc = m.actualBoundingBoxDescent;
+      var out = Object.create(TM);
+      tmState.set(out, { width: m.width, actualBoundingBoxLeft: 0, actualBoundingBoxRight: m.width,
+        fontBoundingBoxAscent: Math.round(size * 0.9), fontBoundingBoxDescent: Math.round(size * 0.25),
+        actualBoundingBoxAscent: asc, actualBoundingBoxDescent: desc,
+        emHeightAscent: size * 0.8, emHeightDescent: size * 0.2,
+        hangingBaseline: size * 0.72, alphabeticBaseline: 0, ideographicBaseline: -size * 0.2 });
+      return out;
+    } }).measureText, 'function measureText() { [native code] }'));
+  }
+  if (_perfState) {
+    var memGet = Object.getOwnPropertyDescriptor(Performance.prototype, 'memory').get;
+    Object.defineProperty(Performance.prototype, 'memory', { get: _markNativeAs(({ get memory() {
+      var m = memGet.call(this);
+      if (m && Object.getPrototypeOf(m) === Object.prototype) adopt(m, 'MemoryInfo');
+      return m;
+    } }).__lookupGetter__('memory'), 'function get memory() { [native code] }'), enumerable: true, configurable: true });
+  }
+  if (nav && !('mediaSession' in nav)) {
+    var ms = { metadata: null, playbackState: 'none', setActionHandler: function setActionHandler() {}, setPositionState: function setPositionState() {}, setMicrophoneActive: function setMicrophoneActive() {}, setCameraActive: function setCameraActive() {} };
+    adopt(ms, 'MediaSession', Object.prototype);
+    Object.defineProperty(Navigator.prototype, 'mediaSession', { get: _markNativeAs(function() { return ms; },
+      'function get mediaSession() { [native code] }'), enumerable: true, configurable: true });
+  }
+
+  // 8. Built-in methods and accessors have no own `prototype` property; shim
+  //    functions written as `function () {}` do, which is an easy native check.
+  //    Re-expose them through prototype-less wrappers with the same name,
+  //    length and native toString.
+  var nativeStr = function(f, fallback) { return _nativeStr.get(f) || fallback; };
+  var bare = function(f, name, str) {
+    if (typeof f !== 'function' || !Object.prototype.hasOwnProperty.call(f, 'prototype')) return f;
+    var w = ({ m(...a) { return f.apply(this, a); } }).m;
+    Object.defineProperty(w, 'name', { value: name, configurable: true });
+    Object.defineProperty(w, 'length', { value: f.length, configurable: true });
+    return _markNativeAs(w, nativeStr(f, str));
+  };
+  var bareMembers = function(P) {
+    Object.getOwnPropertyNames(P).forEach(function(k) {
+      if (k === 'constructor') return;
+      var d = Object.getOwnPropertyDescriptor(P, k);
+      if (!d.configurable) return;
+      var changed = false;
+      if (typeof d.value === 'function' && !/^[A-Z]/.test(k)) {
+        var v = bare(d.value, k, 'function ' + k + '() { [native code] }'); changed = v !== d.value; d.value = v;
+      }
+      if (d.get) { var g = bare(d.get, 'get ' + k, 'function get ' + k + '() { [native code] }'); changed = changed || g !== d.get; d.get = g; }
+      if (d.set) { var st = bare(d.set, 'set ' + k, 'function set ' + k + '() { [native code] }'); changed = changed || st !== d.set; d.set = st; }
+      if (changed) Object.defineProperty(P, k, d);
+    });
+  };
+  Object.getOwnPropertyNames(globalThis).forEach(function(k) {
+    if (!/^[A-Z]/.test(k) || BUILTIN.test(k)) return;
+    var dd = Object.getOwnPropertyDescriptor(globalThis, k);
+    var C = dd && dd.value;
+    if (typeof C === 'function' && C.prototype && typeof C.prototype === 'object') bareMembers(C.prototype);
+  });
+  Object.getOwnPropertyNames(globalThis).forEach(function(k) {
+    if (!/^[a-z]/.test(k)) return;
+    var dd = Object.getOwnPropertyDescriptor(globalThis, k);
+    if (dd && dd.configurable && typeof dd.value === 'function' && Object.prototype.hasOwnProperty.call(dd.value, 'prototype')
+        && !/^(self|window|globalThis|constructor)$/.test(k)) {
+      dd.value = bare(dd.value, k, 'function ' + k + '() { [native code] }');
+      Object.defineProperty(globalThis, k, dd);
+    }
+  });
+
   if (nav && !('appCodeName' in nav)) {
     [['appCodeName', 'Mozilla'], ['appName', 'Netscape']].forEach(function(e) {
       Object.defineProperty(Navigator.prototype, e[0], {
