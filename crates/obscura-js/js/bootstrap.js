@@ -36,7 +36,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__obscura_click_target', '__obscura_mouse_down', '__obscura_mouse_over_target',
     '__obscura_last_mouse', '__obscura_hoverTo',
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
-    '_hoistMembers', '_perfState',
+    '_hoistMembers', '_perfState', '_chromeFullVersion',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -7054,7 +7054,6 @@ class NetworkInformation {
   get effectiveType() { return '4g'; }
   get rtt() { return 50; }
   get saveData() { return false; }
-  get type() { return 'wifi'; }
   get onchange() { return this._onchange || null; }
   set onchange(v) { this._onchange = typeof v === "function" ? v : null; }
   get ontypechange() { return this._ontypechange || null; }
@@ -7096,6 +7095,15 @@ function _chromeMajor() {
 var _GREASE_CHARS = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_'];
 var _GREASE_VER = ['8', '99', '24'];
 var _BRAND_PERMS = [[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];
+
+// Chrome's full version for the UA major, e.g. 145 -> "145.0.7632.160". Build
+// numbers advance about 73 per milestone (153 is 8010); the patch level is a
+// stable pick per context.
+function _chromeFullVersion() {
+  var major = +_chromeMajor();
+  var build = 8010 - (153 - major) * 73;
+  return major + ".0." + build + "." + (40 + Math.floor(_fpRand(707) * 140));
+}
 function _uaBrands() {
   var seed = _chromeMajor();
   var grease = {
@@ -7130,12 +7138,12 @@ globalThis.navigator = {
         architecture: "x86",
         bitness: "64",
         brands: brands,
-        fullVersionList: brands.map(function(b) { return {brand: b.brand, version: b.version + ".0.0.0"}; }),
+        fullVersionList: brands.map(function(b) { return {brand: b.brand, version: /Chrom/.test(b.brand) ? _chromeFullVersion() : b.version + ".0.0.0"}; }),
         mobile: false,
         model: "",
         platform: globalThis.__obscura_ua_platform || "Windows",
         platformVersion: globalThis.__obscura_ua_platform_version || "15.0.0",
-        uaFullVersion: _chromeMajor() + ".0.0.0",
+        uaFullVersion: _chromeFullVersion(),
         wow64: false,
       });
     },
@@ -13866,88 +13874,258 @@ if (typeof Document !== 'undefined' && typeof Document.parseHTMLUnsafe !== 'func
   _markNative(Document.parseHTMLUnsafe);
 }
 
-globalThis.AudioBuffer = class AudioBuffer {
-  constructor(opts) {
-    var o = (typeof opts === 'object' && opts !== null) ? opts : {};
-    this.numberOfChannels = o.numberOfChannels || 1;
-    this.length = o.length || 0;
-    this.sampleRate = o.sampleRate || 44100;
-    this.duration = this.length / (this.sampleRate || 44100);
-    this._chs = [];
-    for (var c = 0; c < this.numberOfChannels; c++) this._chs.push(new Float32Array(this.length));
-  }
-  getChannelData(c) { return this._chs[c] || this._chs[0] || new Float32Array(0); }
-  copyFromChannel(dst, ch, start) { var s=this._chs[ch]||this._chs[0]; start=start||0; for(var i=0;i<dst.length;i++) dst[i]=(s&&s[start+i])||0; }
-  copyToChannel(src, ch, start) { var d=this._chs[ch]||this._chs[0]; start=start||0; if(d) for(var i=0;i<src.length;i++) d[start+i]=src[i]; }
-};
-globalThis.AudioContext = class AudioContext {
-  constructor() { this.sampleRate=_fp('audioSampleRate'); this.state='running'; this.currentTime=0; this.baseLatency=_fp('audioBaseLatency'); this.destination={maxChannelCount:2,numberOfInputs:1,numberOfOutputs:0,channelCount:2}; this._listeners={}; }
-  addEventListener(type, fn) { if (!this._listeners[type]) this._listeners[type]=[]; this._listeners[type].push(fn); }
-  removeEventListener(type, fn) { if (this._listeners[type]) this._listeners[type]=this._listeners[type].filter(h=>h!==fn); }
-  _ap(v, min=-3.4028235e38, max=3.4028235e38) { return { value: v, defaultValue: v, minValue: min, maxValue: max, setValueAtTime(){} }; }
-  createOscillator() { return {context:this,type:'sine',frequency:this._ap(440, -22050, 22050),detune:this._ap(0, -153600, 153600),connect(){},start(){},stop(){},disconnect(){},addEventListener(){},removeEventListener(){}}; }
-  createDynamicsCompressor() { return {context:this,threshold:this._ap(_fp('compThreshold'), -100, 0),knee:this._ap(_fp('compKnee'), 0, 40),ratio:this._ap(_fp('compRatio'), 1, 20),attack:this._ap(0.003, 0, 1),release:this._ap(0.25, 0, 1),reduction:0,connect(){},disconnect(){}}; }
-  createAnalyser() {
-    return {context:this,fftSize:2048,frequencyBinCount:1024,channelCount:2,channelCountMode:'max',channelInterpretation:'speakers',maxDecibels:-30,minDecibels:-100,numberOfInputs:1,numberOfOutputs:1,smoothingTimeConstant:0.8,connect(){},disconnect(){},
-      getByteFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=Math.floor(_fpRand(600+i)*10);},
-      getFloatFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=-100+_fpRand(700+i)*5;}
-    };
-  }
-  createGain() { return {context:this,gain:this._ap(1),connect(){},disconnect(){}}; }
-  createBiquadFilter() { return {context:this,type:'lowpass',frequency:this._ap(350, 0, 22050),Q:this._ap(1, 0.0001, 1000),gain:this._ap(0, -40, 40),connect(){},disconnect(){}}; }
-  createBufferSource() { return {context:this,buffer:null,connect(){},start(){},stop(){},disconnect(){},loop:false}; }
-  createBuffer(ch,len,rate) { return new globalThis.AudioBuffer({numberOfChannels:ch||1,length:len||0,sampleRate:rate||44100}); }
-  createScriptProcessor() { return {connect(){},disconnect(){},onaudioprocess:null}; }
-  decodeAudioData(buf) { return Promise.resolve(this.createBuffer(2,44100,44100)); }
-  resume() { this.state='running'; return Promise.resolve(); }
-  suspend() { this.state='suspended'; return Promise.resolve(); }
-  close() { this.state='closed'; return Promise.resolve(); }
-};
-globalThis.OfflineAudioContext = class OfflineAudioContext extends AudioContext {
-  constructor(ch,len,rate) {
-    super();
-    if (typeof ch === 'object' && ch !== null) {
-      this.length = ch.length || 44100;
-      this.sampleRate = ch.sampleRate || 44100;
-    } else {
-      this.length = len || 44100;
-      this.sampleRate = rate || 44100;
+// Web Audio, shaped like Chrome's: BaseAudioContext with AudioContext and
+// OfflineAudioContext as siblings; AudioNode/AudioParam interfaces; members on
+// prototypes and state in private fields (no own properties); Chrome's
+// defaults (a fresh AudioContext is 'suspended' without a user gesture).
+{
+  const MAXF = 3.4028234663852886e38;
+  const KEY = Symbol('audio');
+  class AudioBuffer {
+    #ch; #len; #rate;
+    constructor(options) {
+      const o = options && typeof options === 'object' ? options : null;
+      if (!o || !(o.length > 0) || !(o.sampleRate > 0)) throw new TypeError("Failed to construct 'AudioBuffer': The provided value for 'length' or 'sampleRate' is invalid.");
+      const n = o.numberOfChannels || 1;
+      this.#len = o.length >>> 0; this.#rate = +o.sampleRate;
+      this.#ch = []; for (let c = 0; c < n; c++) this.#ch.push(new Float32Array(this.#len));
     }
-    this.oncomplete = null;
+    get sampleRate() { return this.#rate; }
+    get length() { return this.#len; }
+    get duration() { return this.#len / this.#rate; }
+    get numberOfChannels() { return this.#ch.length; }
+    getChannelData(c) {
+      if (!(c >= 0 && c < this.#ch.length)) throw new DOMException(`Failed to execute 'getChannelData' on 'AudioBuffer': channel index (${c}) exceeds number of channels (${this.#ch.length})`, 'IndexSizeError');
+      return this.#ch[c];
+    }
+    copyFromChannel(dst, c, start = 0) { const src = this.getChannelData(c); for (let i = 0; i < dst.length; i++) dst[i] = src[start + i] || 0; }
+    copyToChannel(src, c, start = 0) { const dst = this.getChannelData(c); for (let i = 0; i < src.length && start + i < dst.length; i++) dst[start + i] = src[i]; }
   }
-  startRendering() {
-    var self = this;
-    var buf = this.createBuffer(1, self.length, 44100);
-    var data = buf.getChannelData(0);
-    // Simulate compressed triangle wave at 10kHz.
-    // Target: sum(|data[4500..5000]|) matches Chrome Linux (~124.04347527516074).
+  class AudioParam {
+    #v; #d; #min; #max;
+    constructor(key, v, min = -MAXF, max = MAXF) { if (key !== KEY) throw new TypeError('Illegal constructor'); this.#v = Math.fround(v); this.#d = Math.fround(v); this.#min = min; this.#max = max; }
+    get value() { return this.#v; }
+    set value(x) { this.#v = Math.fround(+x); }
+    get defaultValue() { return this.#d; }
+    get minValue() { return this.#min; }
+    get maxValue() { return this.#max; }
+    get automationRate() { return 'a-rate'; }
+    setValueAtTime(v) { this.#v = Math.fround(+v); return this; }
+    linearRampToValueAtTime(v) { this.#v = Math.fround(+v); return this; }
+    exponentialRampToValueAtTime(v) { this.#v = Math.fround(+v); return this; }
+    setTargetAtTime() { return this; }
+    setValueCurveAtTime() { return this; }
+    cancelScheduledValues() { return this; }
+    cancelAndHoldAtTime() { return this; }
+  }
+  const param = (v, min, max) => new AudioParam(KEY, v, min, max);
+  class AudioNode extends EventTarget {
+    #ctx; #ins; #outs; #cc; #ccm; #ci;
+    constructor(ctx, ins = 1, outs = 1, cc = 2, ccm = 'max', ci = 'speakers') {
+      if (new.target === AudioNode || !(ctx instanceof BaseAudioContext)) throw new TypeError('Illegal constructor');
+      super();
+      this.#ctx = ctx; this.#ins = ins; this.#outs = outs; this.#cc = cc; this.#ccm = ccm; this.#ci = ci;
+    }
+    get context() { return this.#ctx; }
+    get numberOfInputs() { return this.#ins; }
+    get numberOfOutputs() { return this.#outs; }
+    get channelCount() { return this.#cc; }
+    set channelCount(v) { this.#cc = v >>> 0; }
+    get channelCountMode() { return this.#ccm; }
+    set channelCountMode(v) { this.#ccm = String(v); }
+    get channelInterpretation() { return this.#ci; }
+    set channelInterpretation(v) { this.#ci = String(v); }
+    connect(dest) { return dest instanceof AudioNode ? dest : undefined; }
+    disconnect() {}
+  }
+  class AudioScheduledSourceNode extends AudioNode {
+    #onended = null;
+    constructor(ctx) { if (new.target === AudioScheduledSourceNode) throw new TypeError('Illegal constructor'); super(ctx, 0, 1); }
+    get onended() { return this.#onended; }
+    set onended(f) { this.#onended = typeof f === 'function' ? f : null; }
+    start() {}
+    stop() {}
+  }
+  class OscillatorNode extends AudioScheduledSourceNode {
+    #type = 'sine'; #frequency; #detune;
+    constructor(ctx, o = {}) { super(ctx); const ny = ctx.sampleRate / 2; this.#frequency = param(o.frequency ?? 440, -ny, ny); this.#detune = param(o.detune ?? 0, -153600, 153600); if (o.type) this.#type = o.type; }
+    get type() { return this.#type; }
+    set type(v) { this.#type = String(v); }
+    get frequency() { return this.#frequency; }
+    get detune() { return this.#detune; }
+    setPeriodicWave() { this.#type = 'custom'; }
+  }
+  class AudioBufferSourceNode extends AudioScheduledSourceNode {
+    #buffer = null; #loop = false; #loopStart = 0; #loopEnd = 0; #rate; #detune;
+    constructor(ctx, o = {}) { super(ctx); this.#rate = param(1); this.#detune = param(0); if (o.buffer) this.#buffer = o.buffer; }
+    get buffer() { return this.#buffer; }
+    set buffer(b) { this.#buffer = b; }
+    get loop() { return this.#loop; }
+    set loop(v) { this.#loop = !!v; }
+    get loopStart() { return this.#loopStart; }
+    set loopStart(v) { this.#loopStart = +v; }
+    get loopEnd() { return this.#loopEnd; }
+    set loopEnd(v) { this.#loopEnd = +v; }
+    get playbackRate() { return this.#rate; }
+    get detune() { return this.#detune; }
+  }
+  class GainNode extends AudioNode {
+    #gain;
+    constructor(ctx, o = {}) { super(ctx); this.#gain = param(o.gain ?? 1); }
+    get gain() { return this.#gain; }
+  }
+  class DynamicsCompressorNode extends AudioNode {
+    #p;
+    constructor(ctx) {
+      super(ctx, 1, 1, 2, 'clamped-max');
+      this.#p = { threshold: param(-24, -100, 0), knee: param(30, 0, 40), ratio: param(12, 1, 20), attack: param(0.003, 0, 1), release: param(0.25, 0, 1) };
+    }
+    get threshold() { return this.#p.threshold; }
+    get knee() { return this.#p.knee; }
+    get ratio() { return this.#p.ratio; }
+    get attack() { return this.#p.attack; }
+    get release() { return this.#p.release; }
+    get reduction() { return 0; }
+  }
+  class BiquadFilterNode extends AudioNode {
+    #type = 'lowpass'; #p;
+    constructor(ctx) { super(ctx); const ny = ctx.sampleRate / 2; this.#p = { frequency: param(350, 0, ny), detune: param(0, -153600, 153600), Q: param(1), gain: param(0, -MAXF, 1541.273681640625) }; }
+    get type() { return this.#type; }
+    set type(v) { this.#type = String(v); }
+    get frequency() { return this.#p.frequency; }
+    get detune() { return this.#p.detune; }
+    get Q() { return this.#p.Q; }
+    get gain() { return this.#p.gain; }
+    getFrequencyResponse() {}
+  }
+  class AnalyserNode extends AudioNode {
+    #fft = 2048; #min = -100; #max = -30; #smooth = 0.8;
+    constructor(ctx) { super(ctx, 1, 1, 2, 'max'); }
+    get fftSize() { return this.#fft; }
+    set fftSize(v) { this.#fft = v >>> 0; }
+    get frequencyBinCount() { return this.#fft / 2; }
+    get minDecibels() { return this.#min; }
+    set minDecibels(v) { this.#min = +v; }
+    get maxDecibels() { return this.#max; }
+    set maxDecibels(v) { this.#max = +v; }
+    get smoothingTimeConstant() { return this.#smooth; }
+    set smoothingTimeConstant(v) { this.#smooth = +v; }
+    getByteFrequencyData(a) { for (let i = 0; i < a.length; i++) a[i] = 0; }
+    getFloatFrequencyData(a) { for (let i = 0; i < a.length; i++) a[i] = -Infinity; }
+    getByteTimeDomainData(a) { for (let i = 0; i < a.length; i++) a[i] = 128; }
+    getFloatTimeDomainData(a) { for (let i = 0; i < a.length; i++) a[i] = 0; }
+  }
+  class ScriptProcessorNode extends AudioNode {
+    #size; #handler = null;
+    constructor(ctx, size = 4096) { super(ctx, 1, 1, 2, 'explicit'); this.#size = size; }
+    get bufferSize() { return this.#size; }
+    get onaudioprocess() { return this.#handler; }
+    set onaudioprocess(f) { this.#handler = typeof f === 'function' ? f : null; }
+  }
+  class AudioDestinationNode extends AudioNode {
+    constructor(ctx) { super(ctx, 1, 0, 2, 'explicit'); }
+    get maxChannelCount() { return 2; }
+  }
+  class AudioListener {
+    constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); }
+  }
+  let setState;
+  const DECODABLE = [[0x52, 0x49, 0x46, 0x46], [0x49, 0x44, 0x33], [0xFF, 0xFB], [0xFF, 0xF3], [0x4F, 0x67, 0x67, 0x53], [0x66, 0x4C, 0x61, 0x43]];
+  class BaseAudioContext extends EventTarget {
+    #rate; #dest; #listener; #state; #onstatechange = null;
+    constructor(key, rate, state) {
+      if (key !== KEY) throw new TypeError('Illegal constructor');
+      super();
+      this.#rate = rate; this.#state = state;
+      this.#dest = new AudioDestinationNode(this);
+      this.#listener = new AudioListener(KEY);
+    }
+    get sampleRate() { return this.#rate; }
+    get currentTime() { return 0; }
+    get destination() { return this.#dest; }
+    get listener() { return this.#listener; }
+    get state() { return this.#state; }
+    get onstatechange() { return this.#onstatechange; }
+    set onstatechange(f) { this.#onstatechange = typeof f === 'function' ? f : null; }
+    static { setState = (ctx, st) => { ctx.#state = st; }; }
+    createOscillator() { return new OscillatorNode(this); }
+    createGain() { return new GainNode(this); }
+    createDynamicsCompressor() { return new DynamicsCompressorNode(this); }
+    createBiquadFilter() { return new BiquadFilterNode(this); }
+    createAnalyser() { return new AnalyserNode(this); }
+    createBufferSource() { return new AudioBufferSourceNode(this); }
+    createScriptProcessor(size) { return new ScriptProcessorNode(this, size || 4096); }
+    createBuffer(ch, len, rate) { return new AudioBuffer({ numberOfChannels: ch, length: len, sampleRate: rate }); }
+    decodeAudioData(data, ok, err) {
+      // No decoder backs this shim: recognised containers decode to silence,
+      // anything else fails the way Chrome does.
+      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data, 0, Math.min(12, data.byteLength)) : null;
+      const known = bytes && (DECODABLE.some((sig) => sig.every((b, i) => bytes[i] === b))
+        || (bytes.length >= 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70));
+      if (!known) {
+        const e = new DOMException('Unable to decode audio data', 'EncodingError');
+        if (typeof err === 'function') queueMicrotask(() => err(e));
+        return Promise.reject(e);
+      }
+      const buf = new AudioBuffer({ numberOfChannels: 2, length: this.#rate, sampleRate: this.#rate });
+      if (typeof ok === 'function') queueMicrotask(() => ok(buf));
+      return Promise.resolve(buf);
+    }
+  }
+  class AudioContext extends BaseAudioContext {
+    constructor(options) { super(KEY, (options && options.sampleRate) || _fp('audioSampleRate'), 'suspended'); }
+    get baseLatency() { return 0.01; }
+    get outputLatency() { return 0; }
+    getOutputTimestamp() { return { contextTime: 0, performanceTime: 0 }; }
+    resume() { setState(this, 'running'); return Promise.resolve(); }
+    suspend() { setState(this, 'suspended'); return Promise.resolve(); }
+    close() { setState(this, 'closed'); return Promise.resolve(); }
+  }
+  class OfflineAudioContext extends BaseAudioContext {
+    #len; #oncomplete = null;
+    constructor(ch, len, rate) {
+      const o = typeof ch === 'object' && ch !== null ? ch : { numberOfChannels: ch, length: len, sampleRate: rate };
+      super(KEY, +o.sampleRate || 44100, 'suspended');
+      this.#len = (o.length >>> 0) || 44100;
+    }
+    get length() { return this.#len; }
+    get oncomplete() { return this.#oncomplete; }
+    set oncomplete(f) { this.#oncomplete = typeof f === 'function' ? f : null; }
+    resume() { return Promise.resolve(); }
+    suspend() { return Promise.resolve(); }
+    startRendering() {
+      const self = this, len = this.#len;
+      setState(this, 'running');
+      const buf = new AudioBuffer({ numberOfChannels: 1, length: len, sampleRate: this.sampleRate });
+      const data = buf.getChannelData(0);
+      // Simulate compressed triangle wave at 10kHz.
+      // Target: sum(|data[4500..5000]|) matches Chrome (~124.04347527516074).
     var target = 124.04347527516074 + (_fpRand(9991) - 0.5) * 0.002;
     var freq = 10000, sr = 44100;
-    for (var i = 0; i < self.length; i++) {
+    for (var i = 0; i < len; i++) {
       var phase = ((i * freq / sr) % 1 + 1) % 1;
       data[i] = phase < 0.5 ? 4*phase - 1 : 3 - 4*phase;
     }
     var s = 0;
     for (var i = 4500; i < 5000; i++) s += Math.abs(data[i]);
     var scale = s > 0 ? target / s : 0;
-    for (var i = 0; i < self.length; i++) data[i] *= scale;
-    // Fire oncomplete + 'complete' listeners on next microtask so callers
-    // can register handlers synchronously after startRendering().
-    var p = Promise.resolve().then(function() {
-      var evt = {renderedBuffer: buf, target: self, type: 'complete'};
-      if (typeof self.oncomplete === 'function') {
-        try { self.oncomplete(evt); } catch(e) {}
-      }
-      var listeners = (self._listeners && self._listeners['complete']) || [];
-      for (var i = 0; i < listeners.length; i++) {
-        try { listeners[i](evt); } catch(e) {}
-      }
-      return buf;
-    });
-    return p;
+    for (var i = 0; i < len; i++) data[i] *= scale;
+      return Promise.resolve().then(() => {
+        setState(self, 'closed');
+        const evt = new Event('complete');
+        Object.defineProperty(evt, 'renderedBuffer', { value: buf });
+        if (self.#oncomplete) { try { self.#oncomplete.call(self, evt); } catch (e) {} }
+        try { self.dispatchEvent(evt); } catch (e) {}
+        return buf;
+      });
+    }
   }
-};
-globalThis.webkitAudioContext = globalThis.AudioContext;
+  // Interface objects are non-enumerable globals in Chrome.
+  Object.entries({ AudioBuffer, AudioParam, AudioNode, AudioScheduledSourceNode, OscillatorNode,
+    AudioBufferSourceNode, GainNode, DynamicsCompressorNode, BiquadFilterNode, AnalyserNode, ScriptProcessorNode,
+    AudioDestinationNode, AudioListener, BaseAudioContext, AudioContext, OfflineAudioContext })
+    .forEach(([k, v]) => Object.defineProperty(globalThis, k, { value: v, writable: true, enumerable: false, configurable: true }));
+}
 
 var _VOICES = [
   ['Microsoft David - English (United States)', 'en-US', true, true],
@@ -14115,7 +14293,7 @@ globalThis.caches = {
   keys() { return Promise.resolve([]); },
 };
 
-_markNative(AudioContext); _markNative(OfflineAudioContext);
+
 _markNative(SpeechSynthesisUtterance);
 _markNative(MediaStream); _markNative(MediaStreamTrack);
 _markNative(RTCPeerConnection); _markNative(RTCSessionDescription); _markNative(RTCIceCandidate);
@@ -15770,9 +15948,54 @@ if (typeof FontFace === 'undefined') {
 }
 
 if (typeof SharedWorker === 'undefined') {
-  globalThis.SharedWorker = class SharedWorker {
-    constructor() { this.port = { postMessage(){}, onmessage:null, start(){}, close(){}, addEventListener(){}, removeEventListener(){} }; this.onerror = null; }
-  };
+  // A working SharedWorker: the script runs through the dedicated Worker
+  // machinery (same-realm scope, so navigator/Intl/OffscreenCanvas agree with
+  // the page), then receives a 'connect' event whose ports[0] is entangled
+  // with this object's .port. The former stub never ran the script or
+  // answered, which anti-bot sensors that cross-check page values against a
+  // worker (e.g. Akamai) see as a missing or broken worker.
+  const RUNNERS = new WeakMap();
+  class SharedWorkerRunner extends Worker {
+    // Pre-declare onconnect so `onconnect = ...` in the worker script binds to
+    // the worker scope instead of leaking onto the page's global object.
+    _makeScope() {
+      const scope = super._makeScope();
+      scope.onconnect = null;
+      scope.SharedWorkerGlobalScope = function SharedWorkerGlobalScope() {};
+      return scope;
+    }
+    _autoRun() {
+      super._autoRun();
+      const scope = this._scope;
+      const port = RUNNERS.get(this);
+      if (!scope || !port) return;
+      scope.name = port.name;
+      const evt = { type: 'connect', data: '', origin: '', ports: [port.remote], source: port.remote };
+      try {
+        if (typeof scope.onconnect === 'function') scope.onconnect.call(scope, evt);
+        for (const h of ((scope._ev && scope._ev.connect) || []).slice()) h.call(scope, evt);
+      } catch (e) {
+        console.error('SharedWorker error:', e.message);
+      }
+    }
+  }
+  class SharedWorker extends EventTarget {
+    #port; #onerror = null;
+    constructor(url, options) {
+      if (arguments.length < 1) throw new TypeError("Failed to construct 'SharedWorker': 1 argument required, but only 0 present.");
+      super();
+      const channel = new MessageChannel();
+      this.#port = channel.port1;
+      // The runner starts the script asynchronously, so the port mapping set
+      // right after construction is in place before 'connect' is delivered.
+      const runner = new SharedWorkerRunner(url);
+      RUNNERS.set(runner, { remote: channel.port2, name: typeof options === 'string' ? options : (options && options.name) || '' });
+    }
+    get port() { return this.#port; }
+    get onerror() { return this.#onerror; }
+    set onerror(f) { this.#onerror = typeof f === 'function' ? f : null; }
+  }
+  globalThis.SharedWorker = SharedWorker;
 }
 if (typeof ServiceWorkerContainer === 'undefined') {
   globalThis.ServiceWorkerContainer = class { register(){return Promise.resolve();} getRegistrations(){return Promise.resolve([]);} };
