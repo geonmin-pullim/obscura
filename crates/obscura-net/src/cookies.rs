@@ -86,7 +86,7 @@ impl CookieJar {
 
         let request_host = url.host_str().unwrap_or("").to_lowercase();
         let mut domain_attr: Option<String> = None;
-        let mut path = default_cookie_path(url.path());
+        let mut path_attr: Option<&str> = None;
         let mut secure = false;
         let mut http_only = false;
         let mut expires: Option<u64> = None;
@@ -101,7 +101,7 @@ impl CookieJar {
                             domain_attr = Some(canonical_domain(val));
                         }
                         "path" => {
-                            path = val.trim().to_string();
+                            path_attr = Some(val.trim());
                         }
                         "expires" => {
                             if let Ok(ts) = parse_http_date(val.trim()) {
@@ -139,9 +139,11 @@ impl CookieJar {
         // Validate Domain against the response origin (RFC 6265): an unrelated
         // or public-suffix Domain rejects the cookie so a response from attacker.test
         // cannot scope a cookie to victim.test (GHSA-f22c-8v6q-v6h6).
-        if !cookie_prefix_allows(&name, secure, domain_attr.is_some(), &path) {
+        if !cookie_prefix_allows(&name, secure, domain_attr.is_some(), path_attr) {
             return;
         }
+        let path = path_attr.map(str::to_string)
+            .unwrap_or_else(|| default_cookie_path(url.path()));
         let (domain, host_only) = match resolve_cookie_domain(&request_host, domain_attr.as_deref()) {
             Some(d) => d,
             None => return,
@@ -323,7 +325,7 @@ impl CookieJar {
             if cookie.same_site == "None" && !cookie.secure {
                 continue;
             }
-            if !cookie_prefix_allows(&cookie.name, cookie.secure, !host_only, &cookie.path) {
+            if !cookie_prefix_allows(&cookie.name, cookie.secure, !host_only, Some(&cookie.path)) {
                 continue;
             }
             if cookie.expires.is_some_and(|expires| {
@@ -409,7 +411,7 @@ impl CookieJar {
 
         let request_host = url.host_str().unwrap_or("").to_lowercase();
         let mut domain_attr: Option<String> = None;
-        let mut path = default_cookie_path(url.path());
+        let mut path_attr: Option<&str> = None;
         let mut secure = false;
         let mut expires: Option<u64> = None;
         let mut same_site = "Lax".to_string();
@@ -423,7 +425,7 @@ impl CookieJar {
                             domain_attr = Some(canonical_domain(val));
                         }
                         "path" => {
-                            path = val.trim().to_string();
+                            path_attr = Some(val.trim());
                         }
                         "expires" => {
                             if let Ok(ts) = parse_http_date(val.trim()) {
@@ -457,9 +459,11 @@ impl CookieJar {
             }
         }
 
-        if !cookie_prefix_allows(&name, secure, domain_attr.is_some(), &path) {
+        if !cookie_prefix_allows(&name, secure, domain_attr.is_some(), path_attr) {
             return;
         }
+        let path = path_attr.map(str::to_string)
+            .unwrap_or_else(|| default_cookie_path(url.path()));
         let (domain, host_only) = match resolve_cookie_domain(&request_host, domain_attr.as_deref()) {
             Some(d) => d,
             None => return,
@@ -733,13 +737,15 @@ fn resolve_cookie_domain(origin_host: &str, domain_attr: Option<&str>) -> Option
 /// attribute; `__Host-` additionally requires no Domain attribute and
 /// `Path=/`, which is what makes it a host-only cookie a sibling or parent
 /// host cannot plant. Chrome matches the prefixes case-insensitively.
-fn cookie_prefix_allows(name: &str, secure: bool, has_domain_attr: bool, path: &str) -> bool {
+/// Header and JS setters pass None when Path was omitted, even if the
+/// default path would be /. CDP and file imports already carry a resolved path.
+fn cookie_prefix_allows(name: &str, secure: bool, has_domain_attr: bool, path: Option<&str>) -> bool {
     let has_prefix = |prefix: &str| {
         name.get(..prefix.len())
             .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
     };
     if has_prefix("__host-") {
-        secure && !has_domain_attr && path == "/"
+        secure && !has_domain_attr && path == Some("/")
     } else if has_prefix("__secure-") {
         secure
     } else {
@@ -863,6 +869,98 @@ mod tests {
 
         let header = jar.get_cookie_header_same_site(&url);
         assert!(header.contains("session=abc123"));
+    }
+
+    #[test]
+    fn host_prefix_cookies_require_an_explicit_root_path() {
+        let setters: [fn(&CookieJar, &str, &Url); 2] =
+            [CookieJar::set_cookie, CookieJar::set_cookie_from_js];
+        for (source, set) in setters.into_iter().enumerate() {
+            for request_path in ["/", "/page", "/dir/page"] {
+                let url = Url::parse(&format!("https://example.test{request_path}")).unwrap();
+                for prefix in ["__Host-", "__host-", "__hOsT-"] {
+                    for (attrs, accepted) in [
+                        ("Secure", false),
+                        ("Secure; Path=/", true),
+                        ("Secure; pAtH = /", true),
+                        ("Secure; Path=", false),
+                        ("Secure; Path=relative", false),
+                        ("Secure; Path=/dir", false),
+                        ("Secure; Path=/; Path=/dir", false),
+                        ("Secure; Path=/dir; Path=/", true),
+                    ] {
+                        let jar = CookieJar::new();
+                        let value = format!("{prefix}sid=ok");
+                        set(&jar, &format!("{value}; {attrs}"), &url);
+                        // Inspect storage, not just path-filtered lookup: a
+                        // rejected cookie must not survive on another path.
+                        assert_eq!(jar.get_all_cookies().len(), usize::from(accepted),
+                            "setter {source}, {request_path}, {prefix}, {attrs}");
+                        if accepted {
+                            assert_eq!(jar.get_cookie_header_same_site(&url), value);
+                        }
+                    }
+                }
+
+                // Only __Host- requires an explicit Path. Ordinary and
+                // __Secure- cookies still use the request's default path.
+                for name in ["ordinary", "__Secure-sid"] {
+                    let jar = CookieJar::new();
+                    let value = format!("{name}=ok");
+                    set(&jar, &format!("{value}; Secure"), &url);
+                    let cookies = jar.get_all_cookies();
+                    assert_eq!(cookies.len(), 1);
+                    assert_eq!(cookies[0].path, default_cookie_path(request_path));
+                    assert_eq!(jar.get_cookie_header_same_site(&url), value);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn host_prefix_cookie_without_path_cannot_replace_or_delete() {
+        let setters: [fn(&CookieJar, &str, &Url); 2] =
+            [CookieJar::set_cookie, CookieJar::set_cookie_from_js];
+        let url = Url::parse("https://example.test/page").unwrap();
+        for set in setters {
+            let jar = CookieJar::new();
+            set(&jar, "__Host-sid=kept; Secure; Path=/", &url);
+            for invalid in [
+                "__Host-sid=replaced; Secure",
+                "__Host-sid=; Secure; Max-Age=0",
+                "__Host-sid=; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+            ] {
+                set(&jar, invalid, &url);
+                assert_eq!(jar.get_cookie_header_same_site(&url), "__Host-sid=kept",
+                    "a rejected cookie changed the jar: {invalid}");
+            }
+            set(&jar, "__Host-sid=; Secure; Path=/; Max-Age=0", &url);
+            assert!(jar.get_all_cookies().is_empty(), "valid deletion must still work");
+        }
+    }
+
+    #[test]
+    fn host_prefix_cookie_import_and_reload_preserve_root_path() {
+        let url = Url::parse("https://example.test/page").unwrap();
+        let source = CookieJar::new();
+        source.set_cookie("__Host-sid=kept; Secure; Path=/", &url);
+
+        // CDP imports and persisted cookies carry a resolved path rather
+        // than a raw Set-Cookie attribute list. Preserve their validation.
+        let imported = CookieJar::new();
+        imported.set_cookies_from_cdp_with_scope(
+            source.get_all_cookies().into_iter().map(|cookie| (cookie, true)),
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("cookies.json");
+        source.save_to_file(&path).unwrap();
+        let loaded = CookieJar::new();
+        assert_eq!(loaded.load_from_file(&path).unwrap(), 1);
+        let subdomain = Url::parse("https://sub.example.test/page").unwrap();
+        for jar in [&imported, &loaded] {
+            assert_eq!(jar.get_cookie_header_same_site(&url), "__Host-sid=kept");
+            assert!(jar.get_cookie_header_same_site(&subdomain).is_empty());
+        }
     }
 
     // RFC 6265 §5.3: document.cookie (a non-HTTP API) must not overwrite or
