@@ -38,7 +38,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
     '__obscura_perfMark', '__obscura_nav', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
-    '_offscreenDoc', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
+    '_offscreenDoc', '_handlerSlots', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -7677,14 +7677,11 @@ globalThis.fetch = async (input, init = {}) => {
   const pageOrigin = (function() { try { const u = new URL(_domParse("document_url") || "about:blank"); return u.origin; } catch(e) { return ""; } })();
   const raw = await __obscuraCore.ops.op_fetch_url(url, method, hdrs, body, pageOrigin, fetchMode, fetchCredentials, "");
   const parsed = JSON.parse(raw);
-  if (parsed.blocked) {
-    const err = new TypeError('net::ERR_FAILED');
-    err.name = 'AbortError';
-    err.__aborted = true;
-    throw err;
-  }
-  if (parsed.corsBlocked) {
-    throw new TypeError('Failed to fetch: ' + (parsed.corsError || 'CORS error'));
+  // Chrome rejects blocked, unreachable and CORS-failed requests alike with a
+  // bare TypeError('Failed to fetch'); the details only go to the console.
+  // Sensors probe chrome-extension:// URLs and read exactly this error.
+  if (parsed.blocked || parsed.corsBlocked) {
+    throw new TypeError('Failed to fetch');
   }
   const respType = parsed.status === 0 || parsed.opaque ? "opaque" : "basic";
   const exposeRedirectMetadata = respType !== "opaque" && fetchRedirect === "follow";
@@ -7904,16 +7901,9 @@ globalThis.XMLHttpRequest = class XMLHttpRequest extends XMLHttpRequestEventTarg
       xhr.status = 0;
       xhr.readyState = 4;
       xhr._fireEvent('readystatechange');
-      if (err && err.__aborted) {
-        xhr._aborted = true;
-        xhr._fireEvent('abort');
-        xhr._fireEvent('loadend');
-        if (xhr.onabort) xhr.onabort(err);
-      } else {
-        xhr._fireEvent('error');
-        xhr._fireEvent('loadend');
-        if (xhr.onerror) xhr.onerror(err);
-      }
+      xhr._fireEvent('error');
+      xhr._fireEvent('loadend');
+      if (xhr.onerror) xhr.onerror(err);
     });
   }
 
@@ -14060,22 +14050,52 @@ if (typeof Document !== 'undefined' && typeof Document.parseHTMLUnsafe !== 'func
     .forEach(([k, v]) => Object.defineProperty(globalThis, k, { value: v, writable: true, enumerable: false, configurable: true }));
 }
 
+// Windows system voices come first and depend on the OS language: a Korean
+// Windows ships Heami, an English one David/Mark/Zira. Chrome adds its
+// network voices after them.
+var _SYSTEM_VOICES = {
+  ko: [['Microsoft Heami - Korean (Korean)', 'ko-KR', true, true]],
+  en: [['Microsoft David - English (United States)', 'en-US', true, true],
+       ['Microsoft Mark - English (United States)', 'en-US', false, true],
+       ['Microsoft Zira - English (United States)', 'en-US', false, true]],
+};
 var _VOICES = [
-  ['Microsoft David - English (United States)', 'en-US', true, true],
-  ['Microsoft Mark - English (United States)', 'en-US', false, true],
-  ['Microsoft Zira - English (United States)', 'en-US', false, true],
   ['Google Deutsch', 'de-DE'], ['Google US English', 'en-US'], ['Google UK English Female', 'en-GB'],
   ['Google UK English Male', 'en-GB'], ['Google español', 'es-ES'], ['Google español de Estados Unidos', 'es-US'],
   ['Google français', 'fr-FR'], ['Google हिन्दी', 'hi-IN'], ['Google Bahasa Indonesia', 'id-ID'],
   ['Google italiano', 'it-IT'], ['Google 日本語', 'ja-JP'], ['Google 한국의', 'ko-KR'], ['Google Nederlands', 'nl-NL'],
   ['Google polski', 'pl-PL'], ['Google português do Brasil', 'pt-BR'], ['Google русский', 'ru-RU'],
   ['Google 普通话（中国大陆）', 'zh-CN'], ['Google 粤語（香港）', 'zh-HK'], ['Google 國語（臺灣）', 'zh-TW'],
-].map(function(v) { return { voiceURI: v[0], name: v[0], lang: v[1], localService: !!v[3], default: !!v[2] }; });
+];
+function _voiceList() {
+  var lang = String((globalThis.navigator && navigator.language) || 'en-US').slice(0, 2);
+  return (_SYSTEM_VOICES[lang] || _SYSTEM_VOICES.en).concat(_VOICES)
+    .map(function(v) { return { voiceURI: v[0], name: v[0], lang: v[1], localService: !!v[3], default: !!v[2] }; });
+}
+// Chrome loads voices lazily: the first getVoices() returns [] and starts the
+// load, then 'voiceschanged' fires and later calls return the list.
+var _voicesState = 0; // 0 not requested, 1 loading, 2 loaded
+var _voiceObjects = null;
+var _voiceMaker = function(list) { return list; };
 globalThis.speechSynthesis = {
   speaking: false, pending: false, paused: false,
-  getVoices() { return _VOICES; },
+  getVoices() {
+    if (_voicesState === 2) return _voiceObjects.slice();
+    if (_voicesState === 0) {
+      _voicesState = 1;
+      var synth = this;
+      setTimeout(function() {
+        _voicesState = 2;
+        _voiceObjects = _voiceMaker(_voiceList());
+        var ev = new Event('voiceschanged');
+        var h = synth.onvoiceschanged;
+        if (typeof h === 'function') { try { h.call(synth, ev); } catch (e) { console.error(e); } }
+        synth.dispatchEvent(ev);
+      }, 20 + Math.floor(Math.random() * 40));
+    }
+    return [];
+  },
   speak() {}, cancel() {}, pause() {}, resume() {},
-  addEventListener() {}, removeEventListener() {},
   onvoiceschanged: null,
 };
 globalThis.SpeechSynthesisUtterance = class SpeechSynthesisUtterance { constructor(t){this.text=t;this.lang='en-US';this.rate=1;this.pitch=1;this.volume=1;} };
@@ -14284,9 +14304,28 @@ navigator.scheduling = { isInputPending() { return false; } };
 // Move an object's own members onto interface prototype P the way WebIDL
 // exposes them: methods as native-looking functions, everything else as
 // read-only native getters. Used for shims built as object literals.
+// Event handler attributes (on*) stay settable, per instance, like Chrome's;
+// a getter-only accessor made `obj.onfoo = fn` throw in strict code (Akamai's
+// sensor sets speechSynthesis.onvoiceschanged). EventTarget methods are left
+// to EventTarget.prototype instead of being copied from shim literals.
+var _handlerSlots = new WeakMap();
 function _hoistMembers(obj, P) {
+  var isTarget = typeof EventTarget === 'function' && EventTarget.prototype.isPrototypeOf(P);
   Object.getOwnPropertyNames(obj).forEach(function(k) {
     var d = Object.getOwnPropertyDescriptor(obj, k);
+    if (isTarget && (k === 'addEventListener' || k === 'removeEventListener' || k === 'dispatchEvent')) return;
+    if (/^on[a-z]+$/.test(k) && !d.get && (d.value === null || typeof d.value === 'function')) {
+      Object.defineProperty(P, k, {
+        get: _markNativeAs(function() { var m = _handlerSlots.get(this); return (m && m[k]) || null; }, 'function get ' + k + '() { [native code] }'),
+        set: _markNativeAs(function(v) {
+          var m = _handlerSlots.get(this);
+          if (!m) { m = {}; _handlerSlots.set(this, m); }
+          m[k] = typeof v === 'function' ? v : null;
+        }, 'function set ' + k + '() { [native code] }'),
+        enumerable: true, configurable: true,
+      });
+      return;
+    }
     if (d.get) {
       _markNativeAs(d.get, 'function get ' + k + '() { [native code] }');
       Object.defineProperty(P, k, { get: d.get, set: undefined, enumerable: true, configurable: true });
@@ -16594,6 +16633,20 @@ var _perfTimeline = null;
     ].forEach(function(e) { try { adopt(nav[e[0]], e[1], e[2]); } catch (err) {} });
   }
   if (globalThis.speechSynthesis) adopt(globalThis.speechSynthesis, 'SpeechSynthesis', ET);
+  // Voices are SpeechSynthesisVoice objects: attributes on the prototype.
+  (function() {
+    var SV = iface('SpeechSynthesisVoice');
+    var slots = new WeakMap();
+    ['voiceURI', 'name', 'lang', 'localService', 'default'].forEach(function(k) {
+      Object.defineProperty(SV.prototype, k, {
+        get: _markNativeAs(function() { var v = slots.get(this); if (!v) throw new TypeError('Illegal invocation'); return v[k]; }, 'function get ' + k + '() { [native code] }'),
+        set: undefined, enumerable: true, configurable: true,
+      });
+    });
+    delete SV.prototype.constructor;
+    def(SV.prototype, 'constructor', SV);
+    _voiceMaker = function(list) { return list.map(function(v) { var o = Object.create(SV.prototype); slots.set(o, v); return o; }); };
+  })();
   // Absent in obscura but read by fingerprinters; values match desktop Chrome.
   if (!('crossOriginIsolated' in globalThis)) {
     Object.defineProperty(globalThis, 'crossOriginIsolated', {
