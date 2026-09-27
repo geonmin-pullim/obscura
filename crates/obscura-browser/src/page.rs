@@ -270,6 +270,12 @@ pub struct Page {
     /// consumed by the next `navigate_with_wait_post`, so that navigation keeps
     /// the source document as initiator instead of looking typed ("none").
     document_nav_referrer: std::cell::RefCell<Option<String>>,
+    /// The `referrer` of a CDP Page.navigate. Chrome sends it as the Referer
+    /// header but still treats the navigation as browser-initiated
+    /// (sec-fetch-site: none). Taken by the next navigation.
+    typed_nav_referrer: std::cell::RefCell<Option<String>>,
+    /// Referer header of the navigation in flight (see typed_nav_referrer).
+    typed_referrer: Option<Url>,
     /// Timing of the current document's own fetch, handed to the next realm so
     /// performance.timing and the navigation entry carry real network phases.
     nav_timing: Option<NavTiming>,
@@ -1117,6 +1123,8 @@ impl Page {
             title: String::new(),
             referrer: String::new(),
             document_nav_referrer: std::cell::RefCell::new(None),
+            typed_nav_referrer: std::cell::RefCell::new(None),
+            typed_referrer: None,
             nav_timing: None,
             viewport: (1280.0, 720.0),
             screen_size_override: None,
@@ -1744,6 +1752,8 @@ impl Page {
         if let Ok(source) = Url::parse(&self.referrer) {
             request.initiator = Some(source.clone());
             request.referrer = Some(source);
+        } else if let Some(typed) = &self.typed_referrer {
+            request.referrer = Some(typed.clone());
         }
         #[cfg(feature = "stealth")]
         if let Some(ref stealth) = self.stealth_client {
@@ -3350,6 +3360,11 @@ impl Page {
         let url = Url::parse(url_str).map_err(|e| PageError::InvalidUrl(e.to_string()))?;
         let nav_started = std::time::Instant::now();
         self.nav_timing = None;
+        self.typed_referrer = self
+            .typed_nav_referrer
+            .take()
+            .filter(|_| referrer.is_empty())
+            .and_then(|r| Url::parse(&r).ok());
 
         // The previous document's background loads end with the document.
         self.retire_render_resources();
@@ -4662,6 +4677,11 @@ impl Page {
         if let Some(js) = &mut self.js {
             js.release_object_group();
         }
+    }
+
+    /// Referer for the next navigation from CDP Page.navigate's `referrer`.
+    pub fn set_typed_nav_referrer(&self, referrer: Option<String>) {
+        *self.typed_nav_referrer.borrow_mut() = referrer.filter(|r| !r.is_empty());
     }
 
     pub fn take_pending_navigation(&self) -> Option<(String, String, String)> {

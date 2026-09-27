@@ -1183,6 +1183,9 @@ async fn do_navigate(
         // must run BEFORE the page's own scripts (CDP contract). Hand them to
         // the page so navigate_single can inject them at the right point.
         page.set_preload_scripts(preload_scripts);
+        page.set_typed_nav_referrer(
+            params.get("referrer").and_then(|v| v.as_str()).map(str::to_string),
+        );
 
         let nav_method = params
             .get("__method")

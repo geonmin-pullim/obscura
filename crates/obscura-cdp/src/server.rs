@@ -1610,6 +1610,7 @@ async fn process_with_interception(
     let wait_until = crate::domains::page::parse_wait_until(&req.params);
     let nav_method = req.params.get("__method").and_then(|v| v.as_str()).unwrap_or("GET").to_string();
     let nav_body = req.params.get("__body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let nav_referrer = req.params.get("referrer").and_then(|v| v.as_str()).map(str::to_string);
 
     let preload_scripts: Vec<String> = ctx.preload_scripts.iter().map(|(_, s)| s.clone()).collect();
 
@@ -1636,6 +1637,7 @@ async fn process_with_interception(
         // must run BEFORE the page's own scripts (CDP contract). Hand them
         // to the page so navigate_single can inject them at the right point.
         page.set_preload_scripts(preload_scripts);
+        page.set_typed_nav_referrer(nav_referrer);
         let result = if nav_method == "POST" && !nav_body.is_empty() {
             page.navigate_with_wait_post(&url_owned, wait_until, &nav_method, &nav_body).await
         } else {

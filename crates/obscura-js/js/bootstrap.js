@@ -4691,7 +4691,10 @@ class Element extends Node {
         );
       }
     }
-    const cancelled = !this.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    // The UA fires this: a trusted SubmitEvent, as in Chrome (also for
+    // requestSubmit() from script). Frameworks check event.submitter.
+    const ev = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: submitter || null });
+    const cancelled = !this.dispatchEvent(globalThis.__obscura_markTrusted(ev));
     if (cancelled) return;
     this._navigateSubmit(submitter);
   }
