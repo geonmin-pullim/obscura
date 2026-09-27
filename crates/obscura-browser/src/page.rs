@@ -1741,6 +1741,27 @@ impl Page {
             .unwrap_or([255, 255, 255, 255])
     }
 
+    /// A form POST navigation. Like do_fetch it carries the submitting
+    /// document as initiator and referrer, and in stealth mode goes over the
+    /// Chrome transport with Chrome's POST navigation headers (it used the
+    /// plain HTTP client, a different TLS fingerprint and header set).
+    async fn do_post(&self, url: &Url, body: &str) -> Result<Response, ObscuraNetError> {
+        #[cfg(feature = "stealth")]
+        if let Some(ref stealth) = self.stealth_client {
+            let mut request = ResourceRequest::navigation();
+            if let Ok(source) = Url::parse(&self.referrer) {
+                request.initiator = Some(source.clone());
+                request.referrer = Some(source);
+            }
+            return stealth
+                .post_navigation_with_callbacks(url, request, body.as_bytes().to_vec(), Some(&self.callbacks))
+                .await;
+        }
+        self.http_client
+            .post_form_with_callbacks(url, body, Some(&self.callbacks))
+            .await
+    }
+
     async fn do_fetch(&self, url: &Url) -> Result<Response, ObscuraNetError> {
         // A navigation started by a document (link, form, location=) must carry
         // that document as initiator and referrer, so sec-fetch-site/Referer
@@ -3446,9 +3467,7 @@ impl Page {
                 redirected_from: Vec::new(),
             })
         } else if method == "POST" {
-            self.http_client
-                .post_form_with_callbacks(&url, body, Some(&self.callbacks))
-                .await
+            self.do_post(&url, body).await
         } else {
             self.do_fetch(&url).await
         }

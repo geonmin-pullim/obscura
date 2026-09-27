@@ -90,9 +90,52 @@ fn chrome_header_order(navigation: bool) -> wreq::header::OrigHeaderMap {
         "sec-ch-ua-mobile", "accept", "origin", "sec-fetch-site", "sec-fetch-mode",
         "sec-fetch-dest", "referer", "accept-encoding", "accept-language", "cookie", "priority",
     ];
+    header_order(if navigation { NAV } else { SUB })
+}
+
+fn header_order(names: &[&'static str]) -> wreq::header::OrigHeaderMap {
     let mut order = wreq::header::OrigHeaderMap::new();
-    for name in if navigation { NAV } else { SUB } {
+    for name in names {
         order.insert(*name);
+    }
+    order
+}
+
+/// Chrome's order for a form POST navigation.
+const NAV_POST_ORDER: &[&str] = &[
+    "content-length", "cache-control", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+    "upgrade-insecure-requests", "content-type", "user-agent", "origin", "accept", "sec-fetch-site",
+    "sec-fetch-mode", "sec-fetch-user", "sec-fetch-dest", "referer", "accept-encoding",
+    "accept-language", "cookie", "priority",
+];
+
+/// Chrome's order for a CORS preflight. Chrome sends no client hints on it.
+const PREFLIGHT_ORDER: &[&str] = &[
+    "accept", "access-control-request-method", "access-control-request-headers", "origin",
+    "user-agent", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-dest", "referer",
+    "accept-encoding", "accept-language", "priority",
+];
+
+/// Subresource order with the page's own request headers (fetch/XHR
+/// `headers`) right after content-length, where Chrome puts them.
+fn subresource_order_with(custom: &HashMap<String, String>) -> wreq::header::OrigHeaderMap {
+    const SUB: &[&str] = &[
+        "content-length", "sec-ch-ua-platform", "user-agent", "sec-ch-ua", "content-type",
+        "sec-ch-ua-mobile", "accept", "origin", "sec-fetch-site", "sec-fetch-mode",
+        "sec-fetch-dest", "referer", "accept-encoding", "accept-language", "cookie", "priority",
+    ];
+    let mut names: Vec<String> = vec!["content-length".to_string()];
+    let mut extra: Vec<String> = custom
+        .keys()
+        .map(|k| k.to_ascii_lowercase())
+        .filter(|k| !SUB.contains(&k.as_str()) && !k.starts_with("sec-"))
+        .collect();
+    extra.sort();
+    names.extend(extra);
+    names.extend(SUB[1..].iter().map(|s| s.to_string()));
+    let mut order = wreq::header::OrigHeaderMap::new();
+    for name in names {
+        order.insert(name);
     }
     order
 }
@@ -306,7 +349,7 @@ impl StealthHttpClient {
         url: &Url,
         callbacks: Option<&CallbackRegistry>,
     ) -> Result<Response, ObscuraNetError> {
-        self.fetch_with_profile(url, ResourceRequest::navigation(), callbacks)
+        self.fetch_with_profile(url, ResourceRequest::navigation(), None, callbacks)
             .await
     }
 
@@ -316,13 +359,87 @@ impl StealthHttpClient {
         request: ResourceRequest,
         callbacks: Option<&CallbackRegistry>,
     ) -> Result<Response, ObscuraNetError> {
-        self.fetch_with_profile(url, request, callbacks).await
+        self.fetch_with_profile(url, request, None, callbacks).await
+    }
+
+    /// A form POST navigation (application/x-www-form-urlencoded body) over
+    /// the stealth transport, with Chrome's POST navigation headers. A
+    /// 301/302/303 answer continues as a GET without the body, 307/308 repost.
+    pub async fn post_navigation_with_callbacks(
+        &self,
+        url: &Url,
+        request: ResourceRequest,
+        body: Vec<u8>,
+        callbacks: Option<&CallbackRegistry>,
+    ) -> Result<Response, ObscuraNetError> {
+        self.fetch_with_profile(url, request, Some(body), callbacks).await
+    }
+
+    /// A CORS preflight (OPTIONS) over the stealth transport, shaped like
+    /// Chrome's: no cookies, no client hints, Sec-Fetch cors/empty. Returns
+    /// status and headers; the caller evaluates the CORS answer.
+    pub async fn send_preflight(
+        &self,
+        url: &Url,
+        initiator: &Url,
+        method: &str,
+        request_headers: &str,
+    ) -> Result<Response, ObscuraNetError> {
+        validate_url(url, self.allow_private_network)?;
+        let request = ResourceRequest::subresource(crate::ResourceType::Fetch, initiator);
+        let mut req = self
+            .client
+            .request(wreq::Method::OPTIONS, url.as_str())
+            .default_headers(false)
+            .orig_headers(header_order(PREFLIGHT_ORDER))
+            .header("accept", "*/*")
+            .header("access-control-request-method", method);
+        if !request_headers.is_empty() {
+            req = req.header("access-control-request-headers", request_headers);
+        }
+        req = req
+            .header("origin", initiator.origin().ascii_serialization())
+            .header("user-agent", STEALTH_USER_AGENT)
+            .header("sec-fetch-mode", "cors")
+            .header("sec-fetch-site", request_fetch_site(&request, url))
+            .header("sec-fetch-dest", "empty");
+        if let Some(referer) = request_referrer(&request, url) {
+            req = req.header("referer", referer);
+        }
+        req = req
+            .header("accept-encoding", "gzip, deflate, br, zstd")
+            // default_headers(false) also drops the profile's Accept-Language.
+            .header("accept-language", crate::env_accept_language().unwrap_or("en-US,en;q=0.9"))
+            .header("priority", "u=1, i");
+        let in_flight = InFlightGuard::new(&self.in_flight);
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| ObscuraNetError::Network(format!("{}: {}", url, e)))?;
+        let status = resp.status().as_u16();
+        let mut headers: HashMap<String, String> = HashMap::new();
+        for (k, v) in resp.headers().iter() {
+            crate::client::merge_response_header(
+                &mut headers,
+                k.as_str().to_lowercase(),
+                v.to_str().unwrap_or("").to_string(),
+            );
+        }
+        drop(in_flight);
+        Ok(Response {
+            url: url.clone(),
+            status,
+            headers,
+            body: Vec::new(),
+            redirected_from: Vec::new(),
+        })
     }
 
     async fn fetch_with_profile(
         &self,
         url: &Url,
         request: ResourceRequest,
+        mut post_body: Option<Vec<u8>>,
         callbacks: Option<&CallbackRegistry>,
     ) -> Result<Response, ObscuraNetError> {
         validate_url(url, self.allow_private_network)?;
@@ -352,11 +469,22 @@ impl StealthHttpClient {
         // 21 requests, so the 20th hop is followed and only the 21st fails.
         for _ in 0..=20 {
             validate_request_mode(&request, &current_url)?;
-            let mut req = self.client.get(current_url.as_str());
-
             let navigation = request.mode == RequestMode::Navigate;
+            let mut req = match &post_body {
+                Some(body) => self
+                    .client
+                    .post(current_url.as_str())
+                    .orig_headers(header_order(NAV_POST_ORDER))
+                    .header("cache-control", "max-age=0")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("origin", serialized_request_origin(&request, redirect_tainted))
+                    .body(body.clone()),
+                None => self
+                    .client
+                    .get(current_url.as_str())
+                    .orig_headers(chrome_header_order(navigation)),
+            };
             req = req
-                .orig_headers(chrome_header_order(navigation))
                 .header("accept", request.accept())
                 .header("sec-fetch-site", request_fetch_site(&request, &current_url))
                 .header("sec-fetch-mode", request.mode.header_value())
@@ -405,7 +533,7 @@ impl StealthHttpClient {
 
             let request_info = RequestInfo {
                 url: current_url.clone(),
-                method: "GET".to_string(),
+                method: if post_body.is_some() { "POST" } else { "GET" }.to_string(),
                 headers: self.extra_headers.read().await.clone(),
                 resource_type: request.resource_type,
             };
@@ -417,8 +545,13 @@ impl StealthHttpClient {
             }
 
             let in_flight = InFlightGuard::new(&self.in_flight);
-            let resp = send_get_with_connection_reset_retry(req, &current_url)
-                .await
+            // A POST is not retried: it is not idempotent.
+            let sent = if post_body.is_some() {
+                req.send().await
+            } else {
+                send_get_with_connection_reset_retry(req, &current_url).await
+            };
+            let resp = sent
                 .map_err(|e| {
                     ObscuraNetError::Network(format!(
                         "{}: {} (source: {:?})",
@@ -467,6 +600,10 @@ impl StealthHttpClient {
                         redirect_taints_origin(&request, &current_url, &next_url);
                     redirects.push(current_url.clone());
                     current_url = next_url;
+                    // Fetch: 301/302/303 turn a POST into a GET; 307/308 repost.
+                    if !matches!(status.as_u16(), 307 | 308) {
+                        post_body = None;
+                    }
                     continue;
                 }
             }
@@ -557,7 +694,11 @@ impl StealthHttpClient {
             headers.get("sec-fetch-dest").map(String::as_str),
             Some("document") | Some("iframe")
         );
-        req = req.orig_headers(chrome_header_order(navigation));
+        req = req.orig_headers(if navigation {
+            chrome_header_order(true)
+        } else {
+            subresource_order_with(headers)
+        });
         if !navigation {
             req = req.header("priority", "u=1, i");
         }

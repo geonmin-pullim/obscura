@@ -14423,8 +14423,8 @@ navigator.scheduling = { isInputPending() { return false; } };
 // exposes them: methods as native-looking functions, everything else as
 // read-only native getters. Used for shims built as object literals.
 // Event handler attributes (on*) stay settable, per instance, like Chrome's;
-// a getter-only accessor made `obj.onfoo = fn` throw in strict code (Akamai's
-// sensor sets speechSynthesis.onvoiceschanged). EventTarget methods are left
+// a getter-only accessor made `obj.onfoo = fn` throw in strict code (anti-bot
+// sensors set speechSynthesis.onvoiceschanged). EventTarget methods are left
 // to EventTarget.prototype instead of being copied from shim literals.
 var _handlerSlots = new WeakMap();
 function _hoistMembers(obj, P) {
