@@ -235,6 +235,18 @@ impl PendingFrameWork {
     }
 }
 
+/// When the document fetch started and ended, and what it returned.
+struct NavTiming {
+    started: std::time::Instant,
+    fetched: std::time::Instant,
+    redirects: usize,
+    status: u16,
+    body_len: usize,
+    encoded_len: Option<usize>,
+    content_type: String,
+    content_encoding: String,
+}
+
 pub struct Page {
     pub id: String,
     pub frame_id: String,
@@ -258,6 +270,9 @@ pub struct Page {
     /// consumed by the next `navigate_with_wait_post`, so that navigation keeps
     /// the source document as initiator instead of looking typed ("none").
     document_nav_referrer: std::cell::RefCell<Option<String>>,
+    /// Timing of the current document's own fetch, handed to the next realm so
+    /// performance.timing and the navigation entry carry real network phases.
+    nav_timing: Option<NavTiming>,
     /// CSS viewport used by responsive page JavaScript and CDP screenshots.
     /// The physical `screen` fingerprint remains independent.
     pub viewport: (f32, f32),
@@ -1102,6 +1117,7 @@ impl Page {
             title: String::new(),
             referrer: String::new(),
             document_nav_referrer: std::cell::RefCell::new(None),
+            nav_timing: None,
             viewport: (1280.0, 720.0),
             screen_size_override: None,
             screen_metrics_emulated: false,
@@ -1844,6 +1860,18 @@ impl Page {
             rt.set_dom(dom);
         }
 
+        if let Some(t) = self.nav_timing.take() {
+            rt.set_navigation_timing(serde_json::json!({
+                "sinceStartMs": t.started.elapsed().as_secs_f64() * 1000.0,
+                "fetchMs": t.fetched.duration_since(t.started).as_secs_f64() * 1000.0,
+                "redirects": t.redirects,
+                "status": t.status,
+                "decoded": t.body_len,
+                "encoded": t.encoded_len.unwrap_or(t.body_len),
+                "contentType": t.content_type,
+                "contentEncoding": t.content_encoding,
+            }));
+        }
         rt.run_page_init();
         let _ = rt.execute_script(
             "<device-metrics>",
@@ -2861,6 +2889,7 @@ impl Page {
                 // Each readyState change fires readystatechange on the document;
                 // scripts (e.g. anti-bot sensors) wait on it to start work.
                 "globalThis.__documentReadyState__ = 'interactive';\n\
+                 try { __obscura_perfMark('interactive'); } catch(e) {}\n\
                  try { const rs = new Event('readystatechange', {bubbles:false,cancelable:false}); if (typeof document.onreadystatechange === 'function') { try { document.onreadystatechange.call(document, rs); } catch(e) {} } document.dispatchEvent(rs); } catch(e) {}",
             );
         }
@@ -2946,8 +2975,10 @@ impl Page {
             // a DOMContentLoaded listener.
             let _ = js.execute_script(
                 "<dom-content-loaded>",
-                "try { document.dispatchEvent(new Event('DOMContentLoaded', {bubbles:false,cancelable:false})); } catch(e) {}\n\
-                 try { window.dispatchEvent(new Event('DOMContentLoaded', {bubbles:false,cancelable:false})); } catch(e) {}",
+                "try { __obscura_perfMark('dcl-start'); } catch(e) {}\n\
+                 try { document.dispatchEvent(new Event('DOMContentLoaded', {bubbles:false,cancelable:false})); } catch(e) {}\n\
+                 try { window.dispatchEvent(new Event('DOMContentLoaded', {bubbles:false,cancelable:false})); } catch(e) {}\n\
+                 try { __obscura_perfMark('dcl-end'); } catch(e) {}",
             );
 
             let load_blockers_finished =
@@ -2964,6 +2995,7 @@ impl Page {
             let _ = js.execute_script(
                 "<load-event>",
                 "globalThis.__documentReadyState__ = 'complete';\n\
+                 try { __obscura_perfMark('load-start'); } catch(e) {}\n\
                  try { const rs = new Event('readystatechange', {bubbles:false,cancelable:false}); if (typeof document.onreadystatechange === 'function') { try { document.onreadystatechange.call(document, rs); } catch(e) {} } document.dispatchEvent(rs); } catch(e) {}\n\
                  try {\n\
                    const loadEvent = new Event('load', {bubbles:false,cancelable:false});\n\
@@ -2972,6 +3004,7 @@ impl Page {
                    }\n\
                    try { window.dispatchEvent(loadEvent); } catch(e) {}\n\
                  } catch(e) {}\n\
+                 try { __obscura_perfMark('load-end'); } catch(e) {}\n\
                  try {\n\
                    const ps = new (globalThis.PageTransitionEvent || Event)('pageshow', {bubbles:false,cancelable:false,persisted:false});\n\
                    if (typeof window.onpageshow === 'function') { try { window.onpageshow.call(window, ps); } catch(e) {} }\n\
@@ -3315,6 +3348,8 @@ impl Page {
         referrer: &str,
     ) -> Result<(), PageError> {
         let url = Url::parse(url_str).map_err(|e| PageError::InvalidUrl(e.to_string()))?;
+        let nav_started = std::time::Instant::now();
+        self.nav_timing = None;
 
         // The previous document's background loads end with the document.
         self.retire_render_resources();
@@ -3424,6 +3459,17 @@ impl Page {
         if !response.redirected_from.is_empty() {
             self.url = Some(response.url.clone());
         }
+        let header = |name: &str| response.headers.get(name).cloned().unwrap_or_default();
+        self.nav_timing = Some(NavTiming {
+            started: nav_started,
+            fetched: std::time::Instant::now(),
+            redirects: response.redirected_from.len(),
+            status: response.status,
+            body_len: response.body.len(),
+            encoded_len: header("content-length").parse().ok(),
+            content_type: header("content-type").split(';').next().unwrap_or("").trim().to_string(),
+            content_encoding: header("content-encoding"),
+        });
 
         // Honor the response charset: HTTP Content-Type → <meta charset> sniff
         // in the first 1KB → UTF-8 fallback. Without this, every non-UTF-8

@@ -2393,6 +2393,16 @@ impl ObscuraJsRuntime {
     /// Override the coordinates the navigator.geolocation shim reports. The
     /// values are injected as numeric globals the bootstrap reads; when unset it
     /// keeps the built-in default. Callers validate the range before calling.
+    /// Network timing of the document this realm renders (see
+    /// Page::nav_timing); __obscura_init builds performance.timing and the
+    /// navigation entry from it.
+    pub fn set_navigation_timing(&mut self, timing: serde_json::Value) {
+        let _ = self.execute_runtime_script(
+            "<set-nav-timing>",
+            format!("globalThis.__obscura_nav={};", timing),
+        );
+    }
+
     pub fn set_geolocation(&mut self, latitude: f64, longitude: f64) {
         let _ = self.execute_runtime_script(
             "<set-geo>",

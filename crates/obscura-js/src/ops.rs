@@ -6170,6 +6170,53 @@ fn op_canvas_paint_damage(state: &OpState, nid: u32) -> bool {
     connected
 }
 
+/// Encodes a canvas RGBA buffer for toDataURL/toBlob the way Chrome does:
+/// compressed PNG by default, JPEG (alpha flattened onto black, quality 0.92
+/// unless given) and WebP when asked for; any other type falls back to PNG.
+/// Returns the data URL. The old JS encoder wrote stored (uncompressed)
+/// DEFLATE blocks and ignored the type, so every URL was an oversized PNG.
+#[op2]
+#[string]
+fn op_encode_image(
+    #[string] mime: &str,
+    width: u32,
+    height: u32,
+    #[buffer] rgba: &[u8],
+    quality: f64,
+) -> String {
+    use image::ImageEncoder as _;
+    if width == 0 || height == 0 || rgba.len() < (width as usize) * (height as usize) * 4 {
+        return "data:,".to_string();
+    }
+    let mut out = Vec::new();
+    let (mime, ok) = match mime.to_ascii_lowercase().as_str() {
+        "image/jpeg" => {
+            let q = if (0.0..=1.0).contains(&quality) { quality } else { 0.92 };
+            let rgb: Vec<u8> = rgba
+                .chunks_exact(4)
+                .flat_map(|p| {
+                    let a = p[3] as u32;
+                    [0, 1, 2].map(|i| ((p[i] as u32 * a + 127) / 255) as u8)
+                })
+                .collect();
+            let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, (q * 100.0).round().clamp(1.0, 100.0) as u8);
+            ("image/jpeg", enc.write_image(&rgb, width, height, image::ExtendedColorType::Rgb8).is_ok())
+        }
+        "image/webp" => {
+            let enc = image::codecs::webp::WebPEncoder::new_lossless(&mut out);
+            ("image/webp", enc.write_image(rgba, width, height, image::ExtendedColorType::Rgba8).is_ok())
+        }
+        _ => {
+            let enc = image::codecs::png::PngEncoder::new(&mut out);
+            ("image/png", enc.write_image(rgba, width, height, image::ExtendedColorType::Rgba8).is_ok())
+        }
+    };
+    if !ok {
+        return "data:,".to_string();
+    }
+    format!("data:{mime};base64,{}", BASE64.encode(out))
+}
+
 /// Milliseconds since the first call, from a monotonic clock with
 /// sub-millisecond resolution; backs performance.now().
 #[op2(fast)]
@@ -6181,6 +6228,7 @@ fn op_high_res_time() -> f64 {
 pub fn build_extension() -> Extension {
     let mut ops = vec![
         op_high_res_time(),
+        op_encode_image(),
         op_dom(),
         op_script_mark_started(),
         op_script_try_start(),

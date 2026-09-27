@@ -36,7 +36,8 @@ const __obscuraCore = globalThis.Deno.core;
     '__obscura_click_target', '__obscura_mouse_down', '__obscura_mouse_over_target',
     '__obscura_last_mouse', '__obscura_hoverTo',
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
-    '_hoistMembers', '_perfState', '_chromeFullVersion',
+    '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
+    '__obscura_perfMark', '__obscura_nav',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -2223,7 +2224,27 @@ function _seedUnchangedConnection(node, connected) {
   node._treeConnectedEpoch = _treeMutationEpoch;
 }
 
-class Node {
+// EventTarget is its own interface, as in Chrome: Node, Window and the
+// non-DOM targets inherit these three methods instead of redefining them.
+// Receiver-less calls (a bare `addEventListener(...)` in page code) target
+// the global object, like Chrome's window methods.
+class EventTarget {
+  addEventListener(type, callback, options) {
+    const target = this == null ? globalThis : this;
+    _eventTargetAdd(target, type, callback, options);
+    if (typeof target._listenerAdded === "function") target._listenerAdded(type, callback);
+  }
+  removeEventListener(type, callback, options) {
+    _eventTargetRemove(this == null ? globalThis : this, type, callback, options);
+  }
+  dispatchEvent(event) {
+    const target = this == null ? globalThis : this;
+    return target instanceof Element || target instanceof Document
+      ? _domEventDispatch(target, event) : _eventTargetDispatch(target, event);
+  }
+}
+
+class Node extends EventTarget {
   static ELEMENT_NODE = 1;
   static ATTRIBUTE_NODE = 2;
   static TEXT_NODE = 3;
@@ -2243,7 +2264,7 @@ class Node {
   static DOCUMENT_POSITION_CONTAINED_BY = 16;
   static DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
 
-  constructor(nid) { this._nid = nid; }
+  constructor(nid) { super(); this._nid = nid; }
   get nodeType() { return +_dom("node_type", this._nid); }
   get nodeName() { return _domParse("node_name", this._nid) || ""; }
   get ownerDocument() { return globalThis.document; }
@@ -2570,15 +2591,6 @@ class Node {
     return true;
   }
   isSameNode(other) { return !!other && this._nid === other._nid; }
-  addEventListener(type, callback, options) {
-    _eventTargetAdd(this, type, callback, options);
-  }
-  removeEventListener(type, callback, options) {
-    _eventTargetRemove(this, type, callback, options);
-  }
-  dispatchEvent(event) {
-    return _eventTargetDispatch(this, event);
-  }
 }
 class CharacterData extends Node {
   get data() {
@@ -3870,15 +3882,6 @@ class Element extends Node {
         return element;
     }
     return null;
-  }
-  addEventListener(type, handler, opts) {
-    _eventTargetAdd(this, type, handler, opts);
-  }
-  removeEventListener(type, handler, opts) {
-    _eventTargetRemove(this, type, handler, opts);
-  }
-  dispatchEvent(event) {
-    return _domEventDispatch(this, event);
   }
   _resolveInlineHandler(name) {
     // name = 'onclick' / 'onsubmit' / etc. Compile the content attribute
@@ -5757,15 +5760,6 @@ class Document extends Node {
     return new Cls('');
   }
   createRange() { return new Range(); }
-  addEventListener(type, fn, opts) {
-    _eventTargetAdd(this, type, fn, opts);
-  }
-  removeEventListener(type, fn, opts) {
-    _eventTargetRemove(this, type, fn, opts);
-  }
-  dispatchEvent(event) {
-    return _domEventDispatch(this, event);
-  }
   createTreeWalker(root, whatToShow, filter) {
     // whatToShow is unsigned long; default SHOW_ALL only when the arg is omitted.
     // An explicit 0 (show nothing) must stay 0, not become SHOW_ALL.
@@ -6211,7 +6205,7 @@ class TextTrackCueList extends Array {
   }
   item(index) { return this[index] || null; }
 }
-class TextTrack extends Node {
+class TextTrack extends EventTarget {
   constructor(element, kind, label, language) {
     super();
     this._element = element || null;
@@ -6592,8 +6586,8 @@ class HTMLImageElement extends Element {
     this._imageDecodeWaiters = remaining;
   }
 
-  addEventListener(type, callback, options) {
-    super.addEventListener(type, callback, options);
+  // Called by EventTarget.prototype.addEventListener.
+  _listenerAdded(type, callback) {
     if ((String(type) === "load" || String(type) === "error") && callback) {
       this._refreshImageFromCache();
       this._queueImageRequest();
@@ -11149,9 +11143,14 @@ globalThis.performance = globalThis.performance || {
       // Integer-millisecond readings gave every event in a burst the same
       // timeStamp, which behavioural sensors read as synthetic input.
       var st = typeof _perfState === 'object' && _perfState;
-      var ms = st && st.hrOrigin !== undefined
-        ? Math.floor((__obscuraCore.ops.op_high_res_time() - st.hrOrigin) * 10) / 10
-        : Date.now() - (globalThis.performance.timeOrigin || 0);
+      // Chrome clamps a monotonic clock in seconds since boot, then subtracts
+      // the origin and scales to ms, so readings carry double rounding noise
+      // (e.g. 403.20000000298023). Clean one-decimal values stand out.
+      var ms;
+      if (st && st.hrOrigin !== undefined) {
+        var boot = st.bootS, ts = boot + (__obscuraCore.ops.op_high_res_time() - st.hrOrigin) / 1000;
+        ms = (Math.floor(ts / 0.0001) * 0.0001 - Math.floor(boot / 0.0001) * 0.0001) * 1000;
+      } else ms = Date.now() - (globalThis.performance.timeOrigin || 0);
       if (ms < _last) return _last;
       _last = ms;
       return _last;
@@ -12383,7 +12382,7 @@ for (const _proto of [Document.prototype, DocumentFragment.prototype]) {
   _proto.prepend = Element.prototype.prepend;
   _proto.replaceChildren = Element.prototype.replaceChildren;
 }
-globalThis.EventTarget = Node;
+globalThis.EventTarget = EventTarget;
 globalThis.HTMLCollection = class HTMLCollection extends Array {
   item(i) {
     i = i >>> 0;
@@ -12854,8 +12853,8 @@ _markNative(globalThis.Selection);
   Element.prototype.matches, Element.prototype.closest,
   Element.prototype.getBoundingClientRect, Element.prototype.getClientRects,
   Element.prototype.checkVisibility,
-  Element.prototype.addEventListener, Element.prototype.removeEventListener,
-  Element.prototype.dispatchEvent, Element.prototype.click,
+  EventTarget, EventTarget.prototype.addEventListener, EventTarget.prototype.removeEventListener,
+  EventTarget.prototype.dispatchEvent, Element.prototype.click,
   Element.prototype.focus, Element.prototype.blur,
   Element.prototype.showPopover, Element.prototype.hidePopover, Element.prototype.togglePopover,
   Element.prototype.cloneNode, Element.prototype.attachShadow,
@@ -13394,76 +13393,6 @@ class _IframeWindow {
   blur() {}
 }
 
-// Encode an RGBA pixel buffer into a valid PNG data URL.
-// Uses stored-block DEFLATE (no compression) wrapped in zlib.
-// This produces a larger file than a real browser but the hash is unique
-// per session (from _fpNoise) and valid, so it does not match the known
-// headless stub.
-function _encodePNG(w, h, rgba) {
-  // RGBA scanlines: filter byte (0) + 4 bytes per pixel.
-  var rowLen = 1 + w * 4;
-  var raw = new Uint8Array(h * rowLen);
-  for (var y = 0; y < h; y++) {
-    var base = y * rowLen;
-    raw[base] = 0;
-    for (var x = 0; x < w; x++) {
-      var s = (y * w + x) << 2, d = base + 1 + x * 4;
-      raw[d] = rgba[s]; raw[d+1] = rgba[s+1]; raw[d+2] = rgba[s+2]; raw[d+3] = rgba[s+3];
-    }
-  }
-  // Adler32 of raw
-  var s1 = 1, s2 = 0, M = 65521;
-  for (var i = 0; i < raw.length; i++) { s1 = (s1 + raw[i]) % M; s2 = (s2 + s1) % M; }
-  var adler = ((s2 << 16) | s1) >>> 0;
-  // Stored DEFLATE blocks (zlib level 0)
-  var MAXB = 65535, nb = Math.ceil(raw.length / MAXB) || 1;
-  var dlen = 2 + nb * 5 + raw.length + 4;
-  var def = new Uint8Array(dlen), dp = 0;
-  def[dp++] = 0x78; def[dp++] = 0x01;
-  for (var bi = 0; bi < nb; bi++) {
-    var bs = bi * MAXB, be = Math.min(raw.length, bs + MAXB), bl = be - bs;
-    def[dp++] = bi === nb-1 ? 1 : 0;
-    def[dp++] = bl&0xff; def[dp++] = (bl>>8)&0xff;
-    def[dp++] = (~bl)&0xff; def[dp++] = (~bl>>8)&0xff;
-    def.set(raw.subarray(bs, be), dp); dp += bl;
-  }
-  def[dp++]=(adler>>24)&0xff; def[dp++]=(adler>>16)&0xff; def[dp++]=(adler>>8)&0xff; def[dp]=adler&0xff;
-  // CRC32 (lazy table)
-  if (!_encodePNG._t) {
-    var t = new Uint32Array(256);
-    for (var n = 0; n < 256; n++) { var c = n; for (var k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):(c>>>1); t[n]=c; }
-    _encodePNG._t = t;
-  }
-  var T = _encodePNG._t;
-  function crc32(a, st, ln) { var c=0xFFFFFFFF; for(var i=st,e=st+ln;i<e;i++) c=T[(c^a[i])&0xff]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
-  function putChunk(out, off, type, data) {
-    var dl = data.length;
-    out[off]=(dl>>24)&0xff; out[off+1]=(dl>>16)&0xff; out[off+2]=(dl>>8)&0xff; out[off+3]=dl&0xff;
-    out[off+4]=type.charCodeAt(0); out[off+5]=type.charCodeAt(1); out[off+6]=type.charCodeAt(2); out[off+7]=type.charCodeAt(3);
-    out.set(data, off+8);
-    var cr = crc32(out, off+4, 4+dl);
-    out[off+8+dl]=(cr>>24)&0xff; out[off+9+dl]=(cr>>16)&0xff; out[off+10+dl]=(cr>>8)&0xff; out[off+11+dl]=cr&0xff;
-    return off+12+dl;
-  }
-  var ihd = new Uint8Array(13);
-  ihd[0]=(w>>24)&0xff; ihd[1]=(w>>16)&0xff; ihd[2]=(w>>8)&0xff; ihd[3]=w&0xff;
-  ihd[4]=(h>>24)&0xff; ihd[5]=(h>>16)&0xff; ihd[6]=(h>>8)&0xff; ihd[7]=h&0xff;
-  ihd[8]=8; ihd[9]=6; // 8-bit RGBA
-  var png = new Uint8Array(8 + 25 + (12+dlen) + 12);
-  png.set([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]);
-  var p = 8;
-  p = putChunk(png, p, 'IHDR', ihd);
-  p = putChunk(png, p, 'IDAT', def);
-  putChunk(png, p, 'IEND', new Uint8Array(0));
-  // Base64 encode
-  var C = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  var b64 = 'data:image/png;base64,';
-  for (var i = 0; i < png.length; i += 3) {
-    var a=png[i], b=i+1<png.length?png[i+1]:0, c=i+2<png.length?png[i+2]:0;
-    b64 += C[a>>2] + C[((a&3)<<4)|(b>>4)] + (i+1<png.length?C[((b&15)<<2)|(c>>6)]:'=') + (i+2<png.length?C[c&63]:'=');
-  }
-  return b64;
-}
 
 globalThis.__ariaQuerySelector = function(root, selector) { return null; };
 globalThis.__ariaQuerySelectorAll = async function*(root, selector) { /* yields nothing */ };
@@ -13634,7 +13563,7 @@ class _Canvas2D {
         }
       }
     }
-    return { data, width: w, height: h };
+    return new ImageData(data, w, h);
   }
   putImageData(imageData, dx, dy) {
     dx=Math.round(dx); dy=Math.round(dy);
@@ -13654,7 +13583,7 @@ class _Canvas2D {
     }
     this._markPaintDamage();
   }
-  createImageData(w, h) { return { data: new Uint8ClampedArray(w*h*4), width: w, height: h }; }
+  createImageData(w, h) { return w instanceof ImageData ? new ImageData(w.width, w.height) : new ImageData(Math.abs(Math.round(w)), Math.abs(Math.round(h))); }
   drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) {
     if (img && img._ctx && img._ctx._buf) {
       const src = img._ctx;
@@ -13780,22 +13709,21 @@ HTMLCanvasElement.prototype.getContext = function getContext(type) {
   }
   return null;
 };
-HTMLCanvasElement.prototype.toDataURL = function(type) {
+HTMLCanvasElement.prototype.toDataURL = function toDataURL(type, quality) {
   const ctx = this._ctx || this.getContext('2d');
-  if (ctx && ctx._buf) {
-    if (ctx._w === 0 || ctx._h === 0) return 'data:,';
-    return _encodePNG(ctx._w, ctx._h, ctx._buf);
-  }
-  return 'data:,';
+  if (!ctx || !ctx._buf || ctx._w === 0 || ctx._h === 0) return 'data:,';
+  const b = ctx._buf;
+  return __obscuraCore.ops.op_encode_image(String(type || 'image/png'), ctx._w, ctx._h,
+    new Uint8Array(b.buffer, b.byteOffset, b.length), typeof quality === 'number' ? quality : -1);
 };
-HTMLCanvasElement.prototype.toBlob = function(cb, type, q) {
+HTMLCanvasElement.prototype.toBlob = function toBlob(cb, type, q) {
   const url = this.toDataURL(type, q);
   const comma = url.indexOf(',');
   if (comma < 0 || !url.startsWith('data:image/')) { cb(null); return; }
   const binary = atob(url.slice(comma + 1));
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  cb(new Blob([bytes], {type: String(type || 'image/png')}));
+  cb(new Blob([bytes], {type: url.slice(5, url.indexOf(';'))}));
 };
 Element.prototype.getBBox = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
 Element.prototype.getComputedTextLength = function() { return 0; };
@@ -15555,8 +15483,6 @@ if (typeof BroadcastChannel === 'undefined') {
     }
     get [Symbol.toStringTag]() { return 'BroadcastChannel'; }
   };
-  // EventTarget is currently Node-backed in this runtime; link the prototype
-  // without invoking Node's DOM-node constructor or exposing a fake `_nid`.
   Object.setPrototypeOf(globalThis.BroadcastChannel.prototype, globalThis.EventTarget.prototype);
 }
 
@@ -15568,11 +15494,28 @@ if (typeof MediaQueryList === 'undefined') {
 }
 
 if (typeof ImageData === 'undefined') {
+  // Chrome's ImageData: data/width/height/colorSpace are prototype getters,
+  // instances have no own properties.
   globalThis.ImageData = class ImageData {
-    constructor(w, h) {
-      if (w instanceof Uint8ClampedArray) { this.data = w; this.width = h; this.height = w.length / (4 * h); }
-      else { this.width = w; this.height = h; this.data = new Uint8ClampedArray(w * h * 4); }
+    #data; #width; #height; #colorSpace;
+    constructor(a, b, c, d) {
+      if (arguments.length < 2) throw new TypeError("Failed to construct 'ImageData': 2 arguments required, but only " + arguments.length + " present.");
+      let settings;
+      if (a instanceof Uint8ClampedArray) {
+        const w = b >>> 0;
+        if (!w || a.length % 4 || (a.length / 4) % w) throw new DOMException("Failed to construct 'ImageData': The input data length is not a multiple of (4 * width).", 'IndexSizeError');
+        this.#data = a; this.#width = w; this.#height = c === undefined ? a.length / 4 / w : c >>> 0; settings = d;
+      } else {
+        const w = a >>> 0, h = b >>> 0;
+        if (!w || !h) throw new DOMException("Failed to construct 'ImageData': The source " + (w ? 'height' : 'width') + ' is zero or not a number.', 'IndexSizeError');
+        this.#data = new Uint8ClampedArray(w * h * 4); this.#width = w; this.#height = h; settings = c;
+      }
+      this.#colorSpace = settings && settings.colorSpace === 'display-p3' ? 'display-p3' : 'srgb';
     }
+    get data() { return this.#data; }
+    get width() { return this.#width; }
+    get height() { return this.#height; }
+    get colorSpace() { return this.#colorSpace; }
   };
 }
 
@@ -16138,6 +16081,8 @@ if (typeof ShadowRoot !== 'undefined' && !ShadowRoot.prototype.elementFromPoint)
 // obscura's shims mostly answered "[object Object]". Align them here, after
 // every shim is defined.
 var _perfState = null;
+// Per-document timeline setup, installed by _interfaceFidelity (4b).
+var _perfTimeline = null;
 (function _interfaceFidelity() {
   var def = function(o, k, v) { Object.defineProperty(o, k, { value: v, writable: true, enumerable: false, configurable: true }); };
   var tag = function(P, name) {
@@ -16269,10 +16214,18 @@ var _perfState = null;
   iface('HTMLDocument', Document.prototype);
 
   // 3. The global object is a Window, and Window is an EventTarget.
+  //    Chrome's chain is Window.prototype -> WindowProperties -> EventTarget,
+  //    and the event methods come from EventTarget.prototype, not the global.
   if (typeof Window === 'function') {
-    if (Object.getPrototypeOf(Window.prototype) === Object.prototype) Object.setPrototypeOf(Window.prototype, ET);
+    if (Object.getPrototypeOf(Window.prototype) === Object.prototype) {
+      var WP = Object.create(ET);
+      Object.defineProperty(WP, Symbol.toStringTag, { value: 'WindowProperties', configurable: true });
+      Object.setPrototypeOf(Window.prototype, WP);
+    }
     tag(Window.prototype, 'Window');
     try { Object.setPrototypeOf(globalThis, Window.prototype); } catch (e) {}
+    if (Object.getPrototypeOf(globalThis) === Window.prototype)
+      ['addEventListener', 'removeEventListener', 'dispatchEvent'].forEach(function(k) { delete globalThis[k]; });
   }
 
   // 4. performance: members on Performance.prototype; per-page values read
@@ -16290,6 +16243,324 @@ var _perfState = null;
     });
     adopt(perf, 'Performance', ET);
   }
+
+  // 4b. Performance timeline: PerformanceTiming, PerformanceNavigation and
+  //     the entry buffer (navigation, visibility-state, paint, mark, measure)
+  //     with Chrome's interfaces, attribute order and toJSON key order. Values
+  //     live in a closure WeakMap, so instances have no own properties. The
+  //     document's fetch phases come from the host (__obscura_nav); DOM phases
+  //     are stamped by the page lifecycle through __obscura_perfMark.
+  if (_perfState) (function() {
+    var Perf = globalThis.Performance;
+    var pnow = Perf.prototype.now;
+    var now = function() { return pnow.call(globalThis.performance); };
+    var later = setTimeout;
+    var slots = new WeakMap();
+    var slot = function(o) { var s = slots.get(o); if (!s) throw new TypeError('Illegal invocation'); return s; };
+    var method = function(P, k, fn) {
+      Object.defineProperty(P, k, { value: _markNativeAs(fn, 'function ' + k + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+    };
+    var toJSONOf = function(keys) {
+      return function toJSON() {
+        var s = slot(this), o = {};
+        keys.forEach(function(k) { var v = s[k]; o[k] = v && typeof v === 'object' && !Array.isArray(v) && slots.has(v) ? v.toJSON() : v; });
+        return o;
+      };
+    };
+    // `proto` lists attributes in Chrome's prototype order, with 'toJSON' and
+    // 'constructor' where they sit (constructor defaults to last); `json` is Chrome's toJSON key order.
+    // Chrome lists `constructor` after toJSON (or last), not first.
+    var moveCtor = function(C) { delete C.prototype.constructor; def(C.prototype, 'constructor', C); };
+    var define = function(name, parentProto, proto, json) {
+      var C = iface(name, parentProto);
+      if (parentProto && Object.getPrototypeOf(C.prototype) !== parentProto) Object.setPrototypeOf(C.prototype, parentProto);
+      var ctorLast = proto.indexOf('constructor') < 0;
+      proto.forEach(function(k) {
+        if (k === 'constructor') { moveCtor(C); return; }
+        if (k === 'toJSON') { method(C.prototype, 'toJSON', toJSONOf(json)); return; }
+        Object.defineProperty(C.prototype, k, {
+          get: _markNativeAs(function() { return slot(this)[k]; }, 'function get ' + k + '() { [native code] }'),
+          set: undefined, enumerable: true, configurable: true,
+        });
+      });
+      if (ctorLast) moveCtor(C);
+      return C;
+    };
+    var make = function(C, v) { var o = Object.create(C.prototype); slots.set(o, v); return o; };
+    // A synthetic time (ms from origin) as Chrome's clamped clock reports it.
+    var rnd = function(x) {
+      var b = _perfState.bootS;
+      return b ? (Math.floor((b + x / 1000) / 0.0001) * 0.0001 - Math.floor(b / 0.0001) * 0.0001) * 1000 : Math.round(x * 10) / 10;
+    };
+
+    var T_PROTO = ['navigationStart', 'unloadEventStart', 'unloadEventEnd', 'redirectStart', 'redirectEnd', 'fetchStart',
+      'domainLookupStart', 'domainLookupEnd', 'connectStart', 'connectEnd', 'secureConnectionStart', 'requestStart',
+      'responseStart', 'responseEnd', 'domLoading', 'domInteractive', 'domContentLoadedEventStart',
+      'domContentLoadedEventEnd', 'domComplete', 'loadEventStart', 'loadEventEnd', 'toJSON', 'constructor'];
+    var T_JSON = ['connectStart', 'secureConnectionStart', 'unloadEventEnd', 'domainLookupStart', 'domainLookupEnd',
+      'responseStart', 'connectEnd', 'responseEnd', 'requestStart', 'domLoading', 'redirectStart', 'loadEventEnd',
+      'domComplete', 'navigationStart', 'loadEventStart', 'domContentLoadedEventEnd', 'unloadEventStart', 'redirectEnd',
+      'domInteractive', 'fetchStart', 'domContentLoadedEventStart'];
+    var E_JSON = ['name', 'entryType', 'startTime', 'duration', 'navigationId'];
+    var R_JSON = E_JSON.concat(['initiatorType', 'deliveryType', 'nextHopProtocol', 'renderBlockingStatus', 'contentType',
+      'contentEncoding', 'workerStart', 'workerRouterEvaluationStart', 'workerCacheLookupStart', 'workerMatchedSourceType',
+      'workerFinalSourceType', 'redirectStart', 'redirectEnd', 'fetchStart', 'domainLookupStart', 'domainLookupEnd',
+      'connectStart', 'secureConnectionStart', 'connectEnd', 'requestStart', 'responseStart', 'firstInterimResponseStart',
+      'finalResponseHeadersStart', 'responseEnd', 'transferSize', 'encodedBodySize', 'decodedBodySize', 'responseStatus',
+      'serverTiming']);
+    var N_JSON = R_JSON.concat(['unloadEventStart', 'unloadEventEnd', 'domInteractive', 'domContentLoadedEventStart',
+      'domContentLoadedEventEnd', 'domComplete', 'loadEventStart', 'loadEventEnd', 'type', 'redirectCount',
+      'activationStart', 'criticalCHRestart', 'notRestoredReasons', 'confidence']);
+
+    var PT = define('PerformanceTiming', null, T_PROTO, T_JSON);
+    var PN = define('PerformanceNavigation', null, ['type', 'redirectCount'], null);
+    ['TYPE_NAVIGATE', 'TYPE_RELOAD', 'TYPE_BACK_FORWARD'].concat(['TYPE_RESERVED']).forEach(function(k, i) {
+      var v = k === 'TYPE_RESERVED' ? 255 : i;
+      Object.defineProperty(PN, k, { value: v, enumerable: true });
+      Object.defineProperty(PN.prototype, k, { value: v, enumerable: true });
+    });
+    method(PN.prototype, 'toJSON', toJSONOf(['type', 'redirectCount']));
+    moveCtor(PN);
+    var PE = define('PerformanceEntry', null, ['name', 'entryType', 'startTime', 'duration', 'toJSON', 'constructor', 'navigationId'], E_JSON);
+    var PR = define('PerformanceResourceTiming', PE.prototype, ['initiatorType', 'nextHopProtocol', 'deliveryType',
+      'workerStart', 'redirectStart', 'redirectEnd', 'fetchStart', 'domainLookupStart', 'domainLookupEnd', 'connectStart',
+      'connectEnd', 'secureConnectionStart', 'requestStart', 'responseStart', 'responseEnd', 'transferSize',
+      'encodedBodySize', 'decodedBodySize', 'serverTiming', 'renderBlockingStatus', 'responseStatus', 'contentType',
+      'contentEncoding', 'finalResponseHeadersStart', 'firstInterimResponseStart', 'toJSON', 'workerRouterEvaluationStart',
+      'workerCacheLookupStart', 'workerMatchedSourceType', 'workerFinalSourceType'], R_JSON);
+    var PNT = define('PerformanceNavigationTiming', PR.prototype, ['unloadEventStart', 'unloadEventEnd', 'domInteractive',
+      'domContentLoadedEventStart', 'domContentLoadedEventEnd', 'domComplete', 'loadEventStart', 'loadEventEnd', 'type',
+      'redirectCount', 'confidence', 'criticalCHRestart', 'activationStart', 'toJSON', 'constructor', 'notRestoredReasons'], N_JSON);
+    var PTC = define('PerformanceTimingConfidence', null, ['randomizedTriggerRate', 'value', 'toJSON'], ['randomizedTriggerRate', 'value']);
+    var PP = define('PerformancePaintTiming', PE.prototype, ['toJSON'], E_JSON);
+    var VSE = define('VisibilityStateEntry', PE.prototype, [], null);
+
+    // PerformanceMark is constructible; PerformanceMeasure is not.
+    var createMark = function(name, opts, proto) {
+      var t = opts && opts.startTime !== undefined ? Number(opts.startTime) : now();
+      if (!(t >= 0)) throw new TypeError("Failed to construct 'PerformanceMark': '" + name + "' cannot have a negative start time.");
+      var detail = opts && opts.detail !== undefined ? structuredClone(opts.detail) : null;
+      var o = Object.create(proto);
+      slots.set(o, { name: name, entryType: 'mark', startTime: t, duration: 0, navigationId: navId, detail: detail });
+      return o;
+    };
+    if (typeof globalThis.PerformanceMark !== 'function') {
+      var PMk = function PerformanceMark(name) {
+        if (!new.target) throw new TypeError("Failed to construct 'PerformanceMark': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+        if (arguments.length < 1) throw new TypeError("Failed to construct 'PerformanceMark': 1 argument required, but only 0 present.");
+        return createMark(String(name), arguments[1], new.target.prototype);
+      };
+      PMk.prototype = Object.create(PE.prototype);
+      def(PMk.prototype, 'constructor', PMk);
+      _markNative(PMk);
+      def(globalThis, 'PerformanceMark', PMk);
+    }
+    var PM = define('PerformanceMark', PE.prototype, ['detail'], null);
+    var PMe = define('PerformanceMeasure', PE.prototype, ['detail'], null);
+
+    var navId = 0;
+    var tl = [], observers = [], t0 = 0, tv = null, nv = null;
+    var sorted = function(list) { return list.slice().sort(function(a, b) { return slot(a).startTime - slot(b).startTime; }); };
+    var ofType = function(list, type) { return list.filter(function(e) { return slot(e).entryType === type; }); };
+    var queue = function(obs, e) {
+      var s = slots.get(obs);
+      s.buf.push(e);
+      if (s.pending) return;
+      s.pending = true;
+      later(function() {
+        s.pending = false;
+        if (!s.buf.length || observers.indexOf(obs) < 0) return;
+        var list = make(POEL, { entries: s.buf.splice(0) });
+        try { s.cb.call(obs, list, obs, { droppedEntriesCount: 0 }); } catch (err) { later(function() { throw err; }); }
+      }, 0);
+    };
+    var add = function(e) {
+      tl.push(e);
+      var type = slot(e).entryType;
+      observers.forEach(function(o) { if (slots.get(o).types.has(type)) queue(o, e); });
+      return e;
+    };
+
+    // Called by __obscura_init once per document. `nav` is the host's fetch
+    // timing ({ sinceStartMs, fetchMs, ... }) or undefined (about:blank, setContent).
+    _perfTimeline = function(origin, nav) {
+      t0 = origin;
+      navId = 1000 + Math.floor(Math.random() * 9000);
+      var f = nav ? Math.max(0, nav.fetchMs) : 0;
+      var fs = f ? 0.2 : 0, dS = f ? fs + 0.3 : 0, dE = dS + f * 0.04, sS = dE + f * 0.18, cE = dE + f * 0.4;
+      var rq = f ? cE + 0.2 : 0, rs = rq + f * 0.5, re = Math.max(rs, fs + f);
+      var abs = function(x) { return Math.round(t0 + x); };
+      tv = { navigationStart: abs(0), unloadEventStart: 0, unloadEventEnd: 0, redirectStart: 0, redirectEnd: 0,
+        fetchStart: abs(fs), domainLookupStart: abs(dS), domainLookupEnd: abs(dE), connectStart: abs(dE),
+        connectEnd: abs(cE), secureConnectionStart: location.protocol === 'https:' ? abs(sS) : 0, requestStart: abs(rq),
+        responseStart: abs(rs), responseEnd: abs(re), domLoading: abs(re + 1.5), domInteractive: 0,
+        domContentLoadedEventStart: 0, domContentLoadedEventEnd: 0, domComplete: 0, loadEventStart: 0, loadEventEnd: 0 };
+      _perfState.timing = make(PT, tv);
+      _perfState.navigation = make(PN, { type: 0, redirectCount: nav ? nav.redirects : 0 });
+      var enc = nav ? nav.encoded : 0;
+      nv = { name: location.href, entryType: 'navigation', startTime: 0, duration: 0, navigationId: navId,
+        initiatorType: 'navigation', deliveryType: '', nextHopProtocol: nav ? (location.protocol === 'https:' ? 'h2' : 'http/1.1') : '',
+        renderBlockingStatus: 'non-blocking', contentType: nav ? nav.contentType : 'text/html',
+        contentEncoding: nav ? nav.contentEncoding : '', workerStart: 0, workerRouterEvaluationStart: 0,
+        workerCacheLookupStart: 0, workerMatchedSourceType: '', workerFinalSourceType: '', redirectStart: 0, redirectEnd: 0,
+        fetchStart: rnd(fs), domainLookupStart: rnd(dS), domainLookupEnd: rnd(dE), connectStart: rnd(dE),
+        secureConnectionStart: location.protocol === 'https:' ? rnd(sS) : 0, connectEnd: rnd(cE), requestStart: rnd(rq),
+        responseStart: rnd(rs), firstInterimResponseStart: 0, finalResponseHeadersStart: rnd(rs), responseEnd: rnd(re),
+        transferSize: nav ? enc + 300 : 0, encodedBodySize: enc, decodedBodySize: nav ? nav.decoded : 0,
+        responseStatus: nav ? nav.status : 200, serverTiming: [], unloadEventStart: 0, unloadEventEnd: 0,
+        domInteractive: 0, domContentLoadedEventStart: 0, domContentLoadedEventEnd: 0, domComplete: 0, loadEventStart: 0,
+        loadEventEnd: 0, type: 'navigate', redirectCount: nav ? nav.redirects : 0, activationStart: 0, criticalCHRestart: 0,
+        notRestoredReasons: null,
+        confidence: make(PTC, { randomizedTriggerRate: Math.round((0.4 + Math.random() * 0.2) * 1e7) / 1e7, value: 'high' }) };
+      tl.length = 0;
+      add(make(PNT, nv));
+      add(make(VSE, { name: document.visibilityState || 'visible', entryType: 'visibility-state', startTime: 0, duration: 0, navigationId: navId }));
+    };
+    // Document lifecycle stamps from the host.
+    var PHASES = { interactive: ['domInteractive'], 'dcl-start': ['domContentLoadedEventStart'],
+      'dcl-end': ['domContentLoadedEventEnd'], 'load-start': ['domComplete', 'loadEventStart'], 'load-end': ['loadEventEnd'] };
+    globalThis.__obscura_perfMark = function(phase) {
+      if (!tv || !PHASES[phase]) return;
+      var t = now();
+      PHASES[phase].forEach(function(k) { nv[k] = t; tv[k] = Math.round(t0 + t); });
+      if (phase === 'load-end') nv.duration = t;
+      if (phase === 'dcl-start' && !ofType(tl, 'paint').length) {
+        add(make(PP, { name: 'first-paint', entryType: 'paint', startTime: t, duration: 0, navigationId: navId }));
+        add(make(PP, { name: 'first-contentful-paint', entryType: 'paint', startTime: t, duration: 0, navigationId: navId }));
+      }
+    };
+
+    var P = Perf.prototype;
+    method(P, 'getEntries', function getEntries() { return sorted(tl); });
+    method(P, 'getEntriesByType', function getEntriesByType(type) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'getEntriesByType' on 'Performance': 1 argument required, but only 0 present.");
+      return sorted(ofType(tl, String(type)));
+    });
+    method(P, 'getEntriesByName', function getEntriesByName(name, type) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'getEntriesByName' on 'Performance': 1 argument required, but only 0 present.");
+      return sorted(tl.filter(function(e) { var s = slot(e); return s.name === String(name) && (type === undefined || s.entryType === String(type)); }));
+    });
+    method(P, 'mark', function mark(name, opts) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'mark' on 'Performance': 1 argument required, but only 0 present.");
+      name = String(name);
+      if (T_PROTO.indexOf(name) >= 0 && name !== 'toJSON')
+        throw new DOMException("Failed to execute 'mark' on 'Performance': '" + name + "' is part of the PerformanceTiming interface, and cannot be used as a mark name.", 'SyntaxError');
+      return add(createMark(name, opts, PM.prototype));
+    });
+    var markTime = function(x) {
+      if (typeof x === 'number') return x;
+      x = String(x);
+      for (var i = tl.length - 1; i >= 0; i--) { var s = slot(tl[i]); if (s.entryType === 'mark' && s.name === x) return s.startTime; }
+      if (T_PROTO.indexOf(x) >= 0 && x !== 'toJSON') {
+        if (!tv[x]) throw new DOMException("Failed to execute 'measure' on 'Performance': '" + x + "' is empty: either the event hasn't happened yet, or it would provide cross-origin timing information.", 'InvalidAccessError');
+        return tv[x] - t0;
+      }
+      throw new DOMException("Failed to execute 'measure' on 'Performance': The mark '" + x + "' does not exist.", 'SyntaxError');
+    };
+    method(P, 'measure', function measure(name, start, end) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'measure' on 'Performance': 1 argument required, but only 0 present.");
+      var opts = start && typeof start === 'object' ? start : null, s0, e0, detail = null;
+      if (opts) {
+        if (opts.detail !== undefined) detail = structuredClone(opts.detail);
+        s0 = opts.start !== undefined ? markTime(opts.start) : undefined;
+        e0 = opts.end !== undefined ? markTime(opts.end) : undefined;
+        if (opts.duration !== undefined) { if (s0 !== undefined) e0 = s0 + Number(opts.duration); else s0 = (e0 === undefined ? now() : e0) - Number(opts.duration); }
+      } else {
+        s0 = start !== undefined ? markTime(start) : undefined;
+        e0 = end !== undefined ? markTime(end) : undefined;
+      }
+      if (s0 === undefined) s0 = 0;
+      if (e0 === undefined) e0 = now();
+      return add(make(PMe, { name: String(name), entryType: 'measure', startTime: s0, duration: e0 - s0, navigationId: navId, detail: detail }));
+    });
+    var clearer = function(type) {
+      return function(name) {
+        for (var i = tl.length - 1; i >= 0; i--) { var s = slot(tl[i]); if (s.entryType === type && (name === undefined || s.name === String(name))) tl.splice(i, 1); }
+      };
+    };
+    method(P, 'clearMarks', clearer('mark'));
+    method(P, 'clearMeasures', clearer('measure'));
+    method(P, 'clearResourceTimings', clearer('resource'));
+    method(P, 'setResourceTimingBufferSize', function setResourceTimingBufferSize() {});
+    method(P, 'toJSON', function toJSON() {
+      return { timeOrigin: this.timeOrigin, timing: this.timing.toJSON(), navigation: this.navigation.toJSON() };
+    });
+    var counts = new Map(['pointerdown', 'touchend', 'input', 'keydown', 'mouseleave', 'mouseenter', 'drop', 'beforeinput',
+      'pointerenter', 'dragend', 'pointercancel', 'compositionupdate', 'mousedown', 'dragleave', 'dragover', 'mouseup',
+      'pointerover', 'lostpointercapture', 'mouseover', 'gotpointercapture', 'dblclick', 'keyup', 'keypress', 'pointerup',
+      'compositionstart', 'auxclick', 'dragstart', 'touchstart', 'compositionend', 'pointerout', 'dragenter',
+      'touchcancel', 'click', 'contextmenu', 'mouseout', 'pointerleave'].map(function(k) { return [k, 0]; }));
+    var EC = iface('EventCounts');
+    Object.defineProperty(EC.prototype, 'size', { get: _markNativeAs(function() { slot(this); return counts.size; }, 'function get size() { [native code] }'), set: undefined, enumerable: true, configurable: true });
+    ['entries', 'forEach', 'get', 'has', 'keys', 'values'].forEach(function(k) {
+      method(EC.prototype, k, function() { slot(this); return k === 'forEach' ? counts.forEach(arguments[0], arguments[1]) : counts[k].apply(counts, arguments); });
+    });
+    moveCtor(EC);
+    Object.defineProperty(EC.prototype, Symbol.iterator, { value: EC.prototype.entries, writable: true, configurable: true });
+    var eventCounts = make(EC, {});
+    // Trusted input (from the CDP Input domain) is what Chrome counts.
+    var markTrusted = globalThis.__obscura_markTrusted;
+    globalThis.__obscura_markTrusted = function(ev) {
+      try { if (ev && counts.has(ev.type)) counts.set(ev.type, counts.get(ev.type) + 1); } catch (_e) {}
+      return markTrusted(ev);
+    };
+    var orb = null;
+    Object.defineProperty(P, 'onresourcetimingbufferfull', {
+      get: _markNativeAs(function() { return orb; }, 'function get onresourcetimingbufferfull() { [native code] }'),
+      set: _markNativeAs(function(v) { orb = typeof v === 'function' ? v : null; }, 'function set onresourcetimingbufferfull() { [native code] }'),
+      enumerable: true, configurable: true });
+    Object.defineProperty(P, 'eventCounts', { get: _markNativeAs(function() { return eventCounts; }, 'function get eventCounts() { [native code] }'), set: undefined, enumerable: true, configurable: true });
+    Object.defineProperty(P, 'interactionCount', { get: _markNativeAs(function() { return 0; }, 'function get interactionCount() { [native code] }'), set: undefined, enumerable: true, configurable: true });
+    // Chrome's own-property order of Performance.prototype.
+    ['timeOrigin', 'onresourcetimingbufferfull', 'clearMarks', 'clearMeasures', 'clearResourceTimings', 'getEntries',
+     'getEntriesByName', 'getEntriesByType', 'mark', 'measure', 'setResourceTimingBufferSize', 'toJSON', 'now',
+     'constructor', 'timing', 'navigation', 'memory', 'eventCounts', 'interactionCount'].forEach(function(k) {
+      var d = Object.getOwnPropertyDescriptor(P, k);
+      if (!d) return;
+      delete P[k];
+      Object.defineProperty(P, k, d);
+    });
+
+    // PerformanceObserver delivering the entries above.
+    var SUPPORTED = ['element', 'event', 'first-input', 'interaction-contentful-paint', 'largest-contentful-paint',
+      'layout-shift', 'long-animation-frame', 'longtask', 'mark', 'measure', 'navigation', 'paint', 'resource',
+      'soft-navigation', 'visibility-state'];
+    var PO = function PerformanceObserver(cb) {
+      if (!new.target) throw new TypeError("Failed to construct 'PerformanceObserver': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+      if (typeof cb !== 'function') throw new TypeError("Failed to construct 'PerformanceObserver': parameter 1 is not of type 'Function'.");
+      slots.set(this, { cb: cb, types: new Set(), buf: [], pending: false });
+    };
+    def(globalThis, 'PerformanceObserver', PO);
+    _markNative(PO);
+    method(PO.prototype, 'observe', function observe(opts) {
+      var s = slot(this);
+      opts = opts || {};
+      if (!opts.entryTypes && opts.type === undefined)
+        throw new TypeError("Failed to execute 'observe' on 'PerformanceObserver': An observe() call must include either entryTypes or type arguments.");
+      var types = opts.entryTypes ? Array.from(opts.entryTypes, String) : [String(opts.type)];
+      types.forEach(function(t) { if (SUPPORTED.indexOf(t) >= 0) s.types.add(t); });
+      if (observers.indexOf(this) < 0) observers.push(this);
+      var self = this;
+      if (opts.buffered && opts.type !== undefined) sorted(ofType(tl, String(opts.type))).forEach(function(e) { queue(self, e); });
+    });
+    method(PO.prototype, 'disconnect', function disconnect() {
+      var i = observers.indexOf(this);
+      if (i >= 0) observers.splice(i, 1);
+      var s = slot(this); s.types.clear(); s.buf.length = 0;
+    });
+    method(PO.prototype, 'takeRecords', function takeRecords() { return slot(this).buf.splice(0); });
+    Object.defineProperty(PO, 'supportedEntryTypes', {
+      get: _markNativeAs(function() { return Object.freeze(SUPPORTED.slice()); }, 'function get supportedEntryTypes() { [native code] }'),
+      set: undefined, enumerable: true, configurable: true,
+    });
+    iface('PerformanceObserver');
+    var POEL = iface('PerformanceObserverEntryList');
+    method(POEL.prototype, 'getEntries', function getEntries() { return sorted(slot(this).entries); });
+    method(POEL.prototype, 'getEntriesByType', function getEntriesByType(type) { return sorted(ofType(slot(this).entries, String(type))); });
+    method(POEL.prototype, 'getEntriesByName', function getEntriesByName(name, type) {
+      return sorted(slot(this).entries.filter(function(e) { var s = slot(e); return s.name === String(name) && (type === undefined || s.entryType === String(type)); }));
+    });
+  })();
 
   // 5. Rects are DOMRects.
   [globalThis.Element, globalThis.Range].forEach(function(C) {
@@ -16529,12 +16800,21 @@ globalThis.__obscura_init = function() {
 
   // A navigation start precedes the wall clock, so skew into the past only: an
   // origin ahead of it makes performance.now() and the rAF timestamp negative.
-  const t0 = Date.now() - 1 - Math.floor(_fpRand(641) * 100);
+  // With the host's fetch timing, the origin is when this navigation started.
+  const _nav = globalThis.__obscura_nav;
+  globalThis.__obscura_nav = undefined;
+  const t0 = _nav ? Math.round((Date.now() - _nav.sinceStartMs) * 10) / 10
+    : Date.now() - 1 - Math.floor(_fpRand(641) * 100);
   var _perf = _perfState || globalThis.performance;
   _perf.timeOrigin = t0;
   // Clock reading that corresponds to t0 on the high-resolution timeline.
-  if (_perfState) _perfState.hrOrigin = __obscuraCore.ops.op_high_res_time() - (Date.now() - t0);
-  _perf.timing = { navigationStart: t0, domContentLoadedEventEnd: t0, loadEventEnd: t0 };
+  if (_perfState) {
+    _perfState.hrOrigin = __obscuraCore.ops.op_high_res_time() - (Date.now() - t0);
+    // Seconds since a pretend boot, one to twenty hours (see performance.now).
+    _perfState.bootS = 3600 + Math.floor(_fpRand(642) * 68400) + Math.random();
+  }
+  if (_perfTimeline) _perfTimeline(t0, _nav);
+  else _perf.timing = { navigationStart: t0, domContentLoadedEventEnd: t0, loadEventEnd: t0 };
   var _totalHeap = 15000000 + Math.floor(_fpRand(620) * 85000000);
   _perf.memory = {
     jsHeapSizeLimit: 4294705152,
