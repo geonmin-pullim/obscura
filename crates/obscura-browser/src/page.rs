@@ -8270,6 +8270,50 @@ mod tests {
     }
 
     #[cfg(feature = "render")]
+    #[test]
+    fn inner_text_matches_rendered_text_semantics() {
+        let mut page = page_with_transport_and_body(
+            "inner-text",
+            "http://example.test/",
+            r#"<div id="visible">A<span style="display:none">B</span><span hidden>C</span><span style="visibility:hidden">H<span style="visibility:visible">D</span></span><script>window.__not_visible = true</script><style>.unused{}</style><p>E</p><br>F</div><div id="blocks">A<div>B</div>C</div><div id="paragraph">A<p>B</p></div><div id="br">A<br>B</div>"#,
+        );
+        let actual = page.evaluate(
+            r#"(() => {
+                const detached = document.createElement('div');
+                detached.textContent = 'Q';
+                const script = document.createElement('script');
+                script.textContent = 'R';
+                detached.append(script);
+                const hidden = document.createElement('span');
+                hidden.hidden = true;
+                hidden.textContent = 'S';
+                detached.append(hidden);
+
+                const hiddenRoot = document.createElement('div');
+                hiddenRoot.style.display = 'none';
+                hiddenRoot.textContent = 'T';
+                const hiddenScript = document.createElement('script');
+                hiddenScript.textContent = 'U';
+                hiddenRoot.append(hiddenScript);
+                document.body.append(hiddenRoot);
+
+                return [
+                    visible.innerText,
+                    blocks.innerText,
+                    paragraph.innerText,
+                    br.innerText,
+                    detached.innerText,
+                    hiddenRoot.innerText,
+                ];
+            })()"#,
+        );
+        assert_eq!(
+            actual,
+            serde_json::json!(["AD\n\nE\n\n\nF", "A\nB\nC", "A\n\nB", "A\nB", "QRS", "TU"]),
+        );
+    }
+
+    #[cfg(feature = "render")]
     #[tokio::test(flavor = "current_thread")]
     async fn renderer_misses_cover_script_fonts_and_shadow_root_styles() {
         let (address, _peak, _open, seen_rx) = spawn_counting_svg_server(0, 6);

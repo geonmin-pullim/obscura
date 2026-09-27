@@ -3501,6 +3501,62 @@ function _animationsForTarget(target) {
   });
 }
 
+const _innerTextBlockDisplays = new Set([
+  'block', 'flow-root', 'flex', 'grid', 'list-item', 'table', 'table-caption',
+]);
+
+function _collectInnerText(node, items, inheritedVisibility = 'visible') {
+  if (node.nodeType === 3) {
+    if (inheritedVisibility === 'visible') items.push(node.data ?? '');
+    return;
+  }
+  if (node.nodeType !== 1) return;
+
+  const style = getComputedStyle(node);
+  const display = style.display;
+  if (display === 'none') return;
+  const visibility = style.visibility || inheritedVisibility;
+  if (visibility === 'visible' && node.tagName === 'BR') {
+    items.push('\n');
+    return;
+  }
+  const breaks = visibility === 'visible'
+    ? (node.tagName === 'P' ? 2 : (_innerTextBlockDisplays.has(display) ? 1 : 0))
+    : 0;
+  if (breaks) items.push(breaks);
+  for (const child of node.childNodes) {
+    _collectInnerText(child, items, visibility);
+  }
+  if (visibility !== 'visible') return;
+  if (display === 'table-cell') items.push('\t');
+  if (display === 'table-row') items.push('\n');
+  if (breaks) items.push(breaks);
+}
+
+function _renderedInnerText(element) {
+  const items = [];
+  for (const child of element.childNodes) {
+    _collectInnerText(child, items);
+  }
+  let result = '';
+  let pendingBreaks = 0;
+  for (const item of items) {
+    if (typeof item === 'number') {
+      pendingBreaks = Math.max(pendingBreaks, item);
+      continue;
+    }
+    const text = item === '\n' || item === '\t'
+      ? item
+      : String(item).replace(/[\t\n\f\r ]+/g, ' ');
+    if (!text || (pendingBreaks && text === ' ')) continue;
+    if (pendingBreaks && result) result += '\n'.repeat(pendingBreaks);
+    pendingBreaks = 0;
+    result += text;
+  }
+  return result.replace(/ +/g, ' ').replace(/ *\n */g, '\n')
+    .replace(/^[ \n\t]+|[ \n\t]+$/g, '');
+}
+
 class Element extends Node {
   constructor(nid) {
     const entry = _customElementConstructionStack[_customElementConstructionStack.length - 1];
@@ -3609,7 +3665,12 @@ class Element extends Node {
     }
   }
   get outerHTML() { return _domParse("outer_html", this._nid) ?? ""; }
-  get innerText() { return this.textContent; }
+  get innerText() {
+    if (!this.isConnected
+        || typeof __obscuraCore.ops.op_computed_style !== 'function'
+        || getComputedStyle(this).display === 'none') return this.textContent;
+    return _renderedInnerText(this);
+  }
   set innerText(v) { this.textContent = v; }
   get children() {
     const ids = _domParse("element_children", this._nid) || [];
