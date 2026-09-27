@@ -37,7 +37,8 @@ const __obscuraCore = globalThis.Deno.core;
     '__obscura_last_mouse', '__obscura_hoverTo',
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
-    '__obscura_perfMark', '__obscura_nav',
+    '__obscura_perfMark', '__obscura_nav', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
+    '_offscreenDoc', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -6832,7 +6833,9 @@ const _locationObj = globalThis.location;
 Object.defineProperty(globalThis, 'location', {
   get() { return _locationObj; },
   set(url) { var r = _resolveUrl(String(url)); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-  configurable: false,
+  // Locked (configurable: false, as in Chrome) by __obscura_init, except in a
+  // worker realm, which replaces it with a WorkerLocation.
+  configurable: true,
   enumerable: true,
 });
 
@@ -13432,7 +13435,9 @@ class _Canvas2D {
     this._buf = new Uint8ClampedArray(this._w * this._h * 4);
     this._resetDrawingState();
     const register = __obscuraCore.ops.op_canvas_register_surface;
-    if (typeof register === 'function') {
+    // Offscreen canvases never paint to the page (and in a worker realm the
+    // element is not in the page's DOM), so they get no paint surface.
+    if (typeof register === 'function' && !this.canvas._offscreen) {
       // op2 accepts Uint8Array, while Canvas exposes Uint8ClampedArray. This
       // second view shares the exact backing store; no pixel copy is made.
       const bytes = new Uint8Array(
@@ -13446,7 +13451,7 @@ class _Canvas2D {
     }
   }
   _markPaintDamage() {
-    if (this._damageQueued) return;
+    if (this._damageQueued || this.canvas._offscreen) return;
     this._damageQueued = true;
     queueMicrotask(() => {
       this._damageQueued = false;
@@ -14334,129 +14339,85 @@ if (typeof TouchEvent === 'undefined') {
 
 globalThis.opener = null;
 
-globalThis.Worker = class Worker {
-  constructor(url) {
-    this.onmessage = null;
-    this.onerror = null;
-    this._terminated = false;
-    this._listeners = {};
-    this._scope = null;
-    this._pendingMessages = [];
-    const worker = this;
+// Dedicated workers run in their own realm (op_worker_realm_create); the page
+// talks to it through the handle __obscura_workerInit returns. Messages are
+// structured-cloned into the receiving realm.
+const _workerSlots = new WeakMap();
+function _workerSource(href) {
+  const stored = globalThis.__blobStore?.[href];
+  if (stored !== undefined) return Promise.resolve(stored);
+  return fetch(href).then((r) => {
+    if (r.ok === false) throw new Error('HTTP ' + r.status);
+    return r.text();
+  });
+}
+function _workerHref(url, api) {
+  try { return new URL(String(url), globalThis.location?.href).href; }
+  catch (_e) { throw new DOMException("Failed to construct '" + api + "': Script at '" + url + "' cannot be accessed from origin '" + (globalThis.location?.origin || 'null') + "'.", 'SecurityError'); }
+}
+function _workerHandlers(C, names) {
+  for (const k of names) {
+    Object.defineProperty(C.prototype, k, {
+      get: _markNativeAs(function() { return _workerSlots.get(this)?.handlers[k] || null; }, 'function get ' + k + '() { [native code] }'),
+      set: _markNativeAs(function(v) { const s = _workerSlots.get(this); if (s) s.handlers[k] = typeof v === 'function' ? v : null; }, 'function set ' + k + '() { [native code] }'),
+      enumerable: true, configurable: true,
+    });
+  }
+}
+function _workerFire(target, type, ev) {
+  const h = _workerSlots.get(target)?.handlers['on' + type];
+  if (h) { try { h.call(target, ev); } catch (e) { console.error(e); } }
+  target.dispatchEvent(ev);
+}
+function _workerToParent(target, slot) {
+  return {
+    message(data) {
+      const value = structuredClone(data);
+      setTimeout(() => { if (!slot.terminated) _workerFire(target, 'message', new MessageEvent('message', { data: value })); }, 0);
+    },
+    error(message, filename, lineno, colno) {
+      setTimeout(() => { if (!slot.terminated) _workerFire(target, 'error', new ErrorEvent('error', { message, filename, lineno, colno, cancelable: true })); }, 0);
+    },
+    close() { slot.terminated = true; },
+  };
+}
 
-    let resolvedUrl = url;
-    if (typeof url === 'string') {
-      const blob = globalThis.__blobStore?.[url];
-      if (blob) {
-        worker._code = blob;
-        // Auto-start on next tick so caller can set onmessage first.
-        setTimeout(() => worker._autoRun(), 0);
-        return;
-      }
-      // Resolve relative URLs against the current page.
-      if (!url.startsWith('http') && !url.startsWith('blob:') && !url.startsWith('data:')) {
-        try { resolvedUrl = new URL(url, globalThis.location?.href || '').href; } catch(e) {}
-      }
-      (async () => {
-        try {
-          const resp = await fetch(resolvedUrl);
-          worker._code = await resp.text();
-          if (!worker._terminated) worker._autoRun();
-        } catch(e) { if (worker.onerror) worker.onerror(e); }
-      })();
-    }
+class Worker extends EventTarget {
+  constructor(url, options) {
+    if (arguments.length < 1) throw new TypeError("Failed to construct 'Worker': 1 argument required, but only 0 present.");
+    super();
+    const href = _workerHref(url, 'Worker');
+    const name = options && options.name !== undefined ? String(options.name) : '';
+    const slot = { handle: null, queue: [], terminated: false, handlers: {} };
+    _workerSlots.set(this, slot);
+    const toParent = _workerToParent(this, slot);
+    _workerSource(href).then((code) => {
+      if (slot.terminated) return;
+      slot.handle = __obscuraCore.ops.op_worker_realm_create('dedicated', href, name, toParent);
+      if (!slot.handle) { toParent.error('Failed to start worker', href, 0, 0); return; }
+      slot.handle.run(code);
+      for (const data of slot.queue.splice(0)) slot.handle.deliver(data);
+    }, () => {
+      setTimeout(() => { if (!slot.terminated) _workerFire(this, 'error', new Event('error', { cancelable: true })); }, 0);
+    });
   }
-  _makeScope() {
-    const worker = this;
-    const scope = {
-      onmessage: null,
-      WorkerGlobalScope: function WorkerGlobalScope() {},
-      DedicatedWorkerGlobalScope: function DedicatedWorkerGlobalScope() {},
-      postMessage: (msg) => {
-        if (worker._terminated) return;
-        const evt = { data: msg };
-        if (worker.onmessage) worker.onmessage(evt);
-        const ls = worker._listeners['message'] || [];
-        for (const h of ls) h(evt);
-      },
-      addEventListener: (type, fn) => {
-        if (!scope._ev) scope._ev = {};
-        if (!scope._ev[type]) scope._ev[type] = [];
-        scope._ev[type].push(fn);
-      },
-      close: () => { worker.terminate(); },
-      crypto: globalThis.crypto,
-      Crypto: globalThis.Crypto,
-      TextEncoder: globalThis.TextEncoder,
-      TextDecoder: globalThis.TextDecoder,
-      atob: globalThis.atob,
-      btoa: globalThis.btoa,
-      setTimeout: globalThis.setTimeout,
-      setInterval: globalThis.setInterval,
-      clearTimeout: globalThis.clearTimeout,
-      clearInterval: globalThis.clearInterval,
-      scheduler: globalThis.scheduler,
-      Scheduler: globalThis.Scheduler,
-      fetch: globalThis.fetch,
-      console: globalThis.console,
-      performance: globalThis.performance,
-      location: globalThis.location,
-    };
-    scope.self = scope;
-    return scope;
-  }
-  _autoRun() {
-    if (this._terminated || this._scope || this._code === undefined) return;
-    const scope = this._makeScope();
-    try {
-      // Direct eval preserves script directives and resolves bare handler names
-      // against the worker scope. Run once so message closures retain their state.
-      const fn = new Function('scope', 'source', 'with (scope) { eval(source); }');
-      fn.call(scope, scope, this._code);
-    } catch(e) {
-      console.error('Worker error:', e.message);
-      if (this.onerror) this.onerror(e);
-    } finally {
-      if (!this._terminated) {
-        this._scope = scope;
-        for (const data of this._pendingMessages.splice(0)) this.postMessage(data);
-      }
-    }
-  }
-  postMessage(data) {
-    if (this._terminated) return;
-    if (!this._scope) {
-      this._pendingMessages.push(data);
-      return;
-    }
-    const worker = this;
-    setTimeout(() => {
-      if (worker._terminated || !worker._scope) return;
-      const scope = worker._scope;
-      try {
-        const event = { data };
-        if (typeof scope.onmessage === 'function') scope.onmessage.call(scope, event);
-        const evs = (scope._ev && scope._ev['message']) || [];
-        for (const handler of evs.slice()) handler.call(scope, event);
-      } catch(e) {
-        console.error('Worker error:', e.message);
-        if (worker.onerror) worker.onerror(e);
-      }
-    }, 0);
+  postMessage(message) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'postMessage' on 'Worker': 1 argument required, but only 0 present.");
+    const slot = _workerSlots.get(this);
+    if (!slot || slot.terminated) return;
+    if (slot.handle) slot.handle.deliver(message);
+    else slot.queue.push(structuredClone(message));
   }
   terminate() {
-    this._terminated = true;
-    this._pendingMessages.length = 0;
-    this._scope = null;
+    const slot = _workerSlots.get(this);
+    if (!slot) return;
+    slot.terminated = true;
+    slot.queue.length = 0;
+    if (slot.handle) slot.handle.terminate();
   }
-  addEventListener(type, fn) {
-    if (!this._listeners[type]) this._listeners[type] = [];
-    this._listeners[type].push(fn);
-  }
-  removeEventListener(type, fn) {
-    if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter(h => h !== fn);
-  }
-};
+}
+_workerHandlers(Worker, ['onmessage', 'onerror', 'onmessageerror']);
+globalThis.Worker = Worker;
 
 globalThis.__blobStore = globalThis.__blobStore || {};
 URL.createObjectURL = function(blob) {
@@ -15523,12 +15484,45 @@ if (typeof CanvasRenderingContext2D === 'undefined') {
   globalThis.CanvasRenderingContext2D = class CanvasRenderingContext2D {};
 }
 
+// OffscreenCanvas draws into a detached <canvas> of this realm's document,
+// held privately, so it also works in a worker realm (which has no global
+// `document`). The old shim created its canvas through globalThis.document and
+// returned null for every context inside a worker.
+var _offscreenDoc = null;
 if (typeof OffscreenCanvas === 'undefined') {
-  globalThis.OffscreenCanvas = class OffscreenCanvas {
-    constructor(w, h) { this.width = w; this.height = h; }
-    getContext(type) { return globalThis.document?.createElement('canvas')?.getContext(type) || null; }
-    convertToBlob() { return Promise.resolve(new Blob([''])); }
-    transferToImageBitmap() { return {}; }
+  class OffscreenCanvasRenderingContext2D {
+    constructor() { throw new TypeError('Illegal constructor'); }
+  }
+  Object.setPrototypeOf(OffscreenCanvasRenderingContext2D.prototype, CanvasRenderingContext2D.prototype);
+  globalThis.OffscreenCanvasRenderingContext2D = OffscreenCanvasRenderingContext2D;
+  globalThis.OffscreenCanvas = class OffscreenCanvas extends EventTarget {
+    #el;
+    constructor(width, height) {
+      if (arguments.length < 2) throw new TypeError("Failed to construct 'OffscreenCanvas': 2 arguments required, but only " + arguments.length + " present.");
+      super();
+      this.#el = (_offscreenDoc || globalThis.document).createElement('canvas');
+      // A worker realm has no HTMLCanvasElement global for createElement to
+      // pick the element class from.
+      if (!(this.#el instanceof HTMLCanvasElement)) Object.setPrototypeOf(this.#el, HTMLCanvasElement.prototype);
+      this.#el._offscreen = true;
+      this.#el.width = width >>> 0;
+      this.#el.height = height >>> 0;
+    }
+    get width() { return this.#el.width; }
+    set width(v) { this.#el.width = v >>> 0; }
+    get height() { return this.#el.height; }
+    set height(v) { this.#el.height = v >>> 0; }
+    getContext(type, options) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'getContext' on 'OffscreenCanvas': 1 argument required, but only 0 present.");
+      const ctx = this.#el.getContext(String(type), options);
+      if (ctx && String(type) === '2d' && Object.getPrototypeOf(ctx) !== OffscreenCanvasRenderingContext2D.prototype)
+        Object.setPrototypeOf(ctx, OffscreenCanvasRenderingContext2D.prototype);
+      return ctx || null;
+    }
+    convertToBlob(options) {
+      return new Promise((resolve) => this.#el.toBlob(resolve, options && options.type, options && options.quality));
+    }
+    transferToImageBitmap() { return typeof ImageBitmap === 'function' ? Object.create(ImageBitmap.prototype) : {}; }
   };
 }
 
@@ -15891,53 +15885,45 @@ if (typeof FontFace === 'undefined') {
 }
 
 if (typeof SharedWorker === 'undefined') {
-  // A working SharedWorker: the script runs through the dedicated Worker
-  // machinery (same-realm scope, so navigator/Intl/OffscreenCanvas agree with
-  // the page), then receives a 'connect' event whose ports[0] is entangled
-  // with this object's .port. The former stub never ran the script or
-  // answered, which anti-bot sensors that cross-check page values against a
-  // worker (e.g. Akamai) see as a missing or broken worker.
-  const RUNNERS = new WeakMap();
-  class SharedWorkerRunner extends Worker {
-    // Pre-declare onconnect so `onconnect = ...` in the worker script binds to
-    // the worker scope instead of leaking onto the page's global object.
-    _makeScope() {
-      const scope = super._makeScope();
-      scope.onconnect = null;
-      scope.SharedWorkerGlobalScope = function SharedWorkerGlobalScope() {};
-      return scope;
-    }
-    _autoRun() {
-      super._autoRun();
-      const scope = this._scope;
-      const port = RUNNERS.get(this);
-      if (!scope || !port) return;
-      scope.name = port.name;
-      const evt = { type: 'connect', data: '', origin: '', ports: [port.remote], source: port.remote };
-      try {
-        if (typeof scope.onconnect === 'function') scope.onconnect.call(scope, evt);
-        for (const h of ((scope._ev && scope._ev.connect) || []).slice()) h.call(scope, evt);
-      } catch (e) {
-        console.error('SharedWorker error:', e.message);
-      }
-    }
-  }
+  // One realm per (script URL, name), like Chrome. Each SharedWorker object
+  // gets its own port; the worker receives a 'connect' event with its end.
+  // The two ends live in different realms, so a pair of channels is bridged.
+  const INSTANCES = new Map();
   class SharedWorker extends EventTarget {
-    #port; #onerror = null;
+    #port;
     constructor(url, options) {
       if (arguments.length < 1) throw new TypeError("Failed to construct 'SharedWorker': 1 argument required, but only 0 present.");
       super();
+      const href = _workerHref(url, 'SharedWorker');
+      const name = typeof options === 'string' ? options : (options && options.name !== undefined ? String(options.name) : '');
+      const slot = { handlers: {}, terminated: false };
+      _workerSlots.set(this, slot);
       const channel = new MessageChannel();
       this.#port = channel.port1;
-      // The runner starts the script asynchronously, so the port mapping set
-      // right after construction is in place before 'connect' is delivered.
-      const runner = new SharedWorkerRunner(url);
-      RUNNERS.set(runner, { remote: channel.port2, name: typeof options === 'string' ? options : (options && options.name) || '' });
+      const bridge = channel.port2;
+      const key = href + '\n' + name;
+      let entry = INSTANCES.get(key);
+      if (!entry) {
+        entry = { handle: null, waiting: [] };
+        INSTANCES.set(key, entry);
+        const toParent = _workerToParent(this, slot);
+        _workerSource(href).then((code) => {
+          entry.handle = __obscuraCore.ops.op_worker_realm_create('shared', href, name, toParent);
+          if (!entry.handle) { INSTANCES.delete(key); toParent.error('Failed to start worker', href, 0, 0); return; }
+          entry.handle.run(code);
+          for (const connect of entry.waiting.splice(0)) connect();
+        }, () => { INSTANCES.delete(key); setTimeout(() => _workerFire(this, 'error', new Event('error')), 0); });
+      }
+      const connect = () => {
+        const inner = entry.handle.connect();
+        bridge.onmessage = (e) => inner.postMessage(e.data);
+        inner.onmessage = (e) => bridge.postMessage(e.data);
+      };
+      if (entry.handle) connect(); else entry.waiting.push(connect);
     }
     get port() { return this.#port; }
-    get onerror() { return this.#onerror; }
-    set onerror(f) { this.#onerror = typeof f === 'function' ? f : null; }
   }
+  _workerHandlers(SharedWorker, ['onerror']);
   globalThis.SharedWorker = SharedWorker;
 }
 if (typeof ServiceWorkerContainer === 'undefined') {
@@ -16416,6 +16402,8 @@ var _perfTimeline = null;
       add(make(PNT, nv));
       add(make(VSE, { name: document.visibilityState || 'visible', entryType: 'visibility-state', startTime: 0, duration: 0, navigationId: navId }));
     };
+    // A worker realm has no document: no navigation or visibility entries.
+    _perfTimeline.reset = function() { tl.length = 0; tv = nv = null; };
     // Document lifecycle stamps from the host.
     var PHASES = { interactive: ['domInteractive'], 'dcl-start': ['domContentLoadedEventStart'],
       'dcl-end': ['domContentLoadedEventEnd'], 'load-start': ['domComplete', 'loadEventStart'], 'load-end': ['loadEventEnd'] };
@@ -16741,6 +16729,246 @@ globalThis.__obscura_hoverTo = function(target, x, y, buttons, altKey, ctrlKey, 
   globalThis.__obscura_mouse_over_target = target;
 };
 
+// Own global property names of a Chrome 153 worker (dedicated and shared),
+// captured with Object.getOwnPropertyNames(self). Everything else the page
+// bootstrap installs is removed from a worker realm.
+var _WORKER_GLOBALS = {
+  common: [
+    'Object', 'Function', 'Array', 'Number', 'parseFloat', 'parseInt', 'Infinity', 'NaN', 'undefined', 'Boolean',
+    'String', 'Symbol', 'Date', 'Promise', 'RegExp', 'Error', 'AggregateError', 'EvalError', 'RangeError',
+    'ReferenceError', 'SyntaxError', 'TypeError', 'URIError', 'globalThis', 'JSON', 'Math', 'Intl', 'ArrayBuffer',
+    'Atomics', 'Uint8Array', 'Int8Array', 'Uint16Array', 'Int16Array', 'Uint32Array', 'Int32Array', 'BigUint64Array',
+    'BigInt64Array', 'Uint8ClampedArray', 'Float32Array', 'Float64Array', 'DataView', 'Map', 'BigInt', 'Set',
+    'Iterator', 'WeakMap', 'WeakSet', 'Proxy', 'Reflect', 'FinalizationRegistry', 'WeakRef', 'decodeURI',
+    'decodeURIComponent', 'encodeURI', 'encodeURIComponent', 'escape', 'unescape', 'eval', 'isFinite', 'isNaN',
+    'console', 'WebSocketStream', 'WebSocketError', 'RestrictionTarget', 'QuotaExceededError',
+    'PushSubscriptionOptions', 'PushSubscription', 'PushManager', 'PeriodicSyncManager', 'Origin', 'Notification',
+    'CropTarget', 'BackgroundFetchRegistration', 'BackgroundFetchRecord', 'BackgroundFetchManager',
+    'XMLHttpRequestUpload', 'XMLHttpRequestEventTarget', 'XMLHttpRequest', 'WritableStreamDefaultWriter',
+    'WritableStreamDefaultController', 'WritableStream', 'WorkerNavigator', 'WorkerLocation', 'WorkerGlobalScope',
+    'WebSocket', 'WebGLVertexArrayObject', 'WebGLUniformLocation', 'WebGLTransformFeedback', 'WebGLTexture',
+    'WebGLSync', 'WebGLShaderPrecisionFormat', 'WebGLShader', 'WebGLSampler', 'WebGLRenderingContext',
+    'WebGLRenderbuffer', 'WebGLQuery', 'WebGLProgram', 'WebGLObject', 'WebGLFramebuffer', 'WebGLContextEvent',
+    'WebGLBuffer', 'WebGLActiveInfo', 'WebGL2RenderingContext', 'UserActivation', 'URLSearchParams', 'URLPattern',
+    'URL', 'TrustedTypePolicyFactory', 'TrustedTypePolicy', 'TrustedScriptURL', 'TrustedScript', 'TrustedHTML',
+    'TransformStreamDefaultController', 'TransformStream', 'TextMetrics', 'TextEncoderStream', 'TextEncoder',
+    'TextDecoderStream', 'TextDecoder', 'TaskSignal', 'TaskPriorityChangeEvent', 'TaskController', 'SyncManager',
+    'Subscriber', 'SecurityPolicyViolationEvent', 'Scheduler', 'Response', 'Request', 'ReportingObserver',
+    'ReportBody', 'ReadableStreamDefaultReader', 'ReadableStreamDefaultController', 'ReadableStreamBYOBRequest',
+    'ReadableStreamBYOBReader', 'ReadableStream', 'ReadableByteStreamController', 'PromiseRejectionEvent',
+    'ProgressEvent', 'Permissions', 'PermissionStatus', 'PerformanceServerTiming', 'PerformanceResourceTiming',
+    'PerformanceObserverEntryList', 'PerformanceObserver', 'PerformanceMeasure', 'PerformanceMark',
+    'PerformanceEntry', 'Performance', 'Path2D', 'OffscreenCanvasRenderingContext2D', 'OffscreenCanvas', 'Observable',
+    'NetworkInformation', 'NavigatorUAData', 'MessagePort', 'MessageEvent', 'MessageChannel', 'MediaCapabilities',
+    'ImageData', 'ImageBitmapRenderingContext', 'ImageBitmap', 'IDBVersionChangeEvent', 'IDBTransaction',
+    'IDBRequest', 'IDBRecord', 'IDBOpenDBRequest', 'IDBObjectStore', 'IDBKeyRange', 'IDBIndex', 'IDBFactory',
+    'IDBDatabase', 'IDBCursorWithValue', 'IDBCursor', 'Headers', 'FormData', 'FontFaceSet', 'FontFace',
+    'FileReaderSync', 'FileReader', 'FileList', 'File', 'EventTarget', 'EventSource', 'Event', 'ErrorEvent',
+    'DecompressionStream', 'DOMStringList', 'DOMRectReadOnly', 'DOMRect', 'DOMQuad', 'DOMPointReadOnly', 'DOMPoint',
+    'DOMMatrixReadOnly', 'DOMMatrix', 'DOMException', 'CustomEvent', 'Crypto', 'CountQueuingStrategy',
+    'CompressionStream', 'CloseEvent', 'CanvasPattern', 'CanvasGradient', 'CSSSkewY', 'CSSSkewX',
+    'ByteLengthQueuingStrategy', 'BroadcastChannel', 'Blob', 'AbortSignal', 'AbortController', 'name', 'close',
+    'webkitRequestFileSystem', 'webkitRequestFileSystemSync', 'webkitResolveLocalFileSystemSyncURL',
+    'webkitResolveLocalFileSystemURL', 'Temporal', 'SuppressedError', 'DisposableStack', 'AsyncDisposableStack',
+    'Float16Array', 'WebAssembly', 'Cache', 'CacheStorage', 'CreateMonitor', 'CryptoKey', 'GPU', 'GPUAdapter',
+    'GPUAdapterInfo', 'GPUBindGroup', 'GPUBindGroupLayout', 'GPUBuffer', 'GPUBufferUsage', 'GPUCanvasContext',
+    'GPUColorWrite', 'GPUCommandBuffer', 'GPUCommandEncoder', 'GPUCompilationInfo', 'GPUCompilationMessage',
+    'GPUComputePassEncoder', 'GPUComputePipeline', 'GPUDevice', 'GPUDeviceLostInfo', 'GPUError', 'GPUExternalTexture',
+    'GPUInternalError', 'GPUMapMode', 'GPUOutOfMemoryError', 'GPUPipelineError', 'GPUPipelineLayout', 'GPUQuerySet',
+    'GPUQueue', 'GPURenderBundle', 'GPURenderBundleEncoder', 'GPURenderPassEncoder', 'GPURenderPipeline',
+    'GPUSampler', 'GPUShaderModule', 'GPUShaderStage', 'GPUSupportedFeatures', 'GPUSupportedLimits', 'GPUTexture',
+    'GPUTextureUsage', 'GPUTextureView', 'GPUUncapturedErrorEvent', 'GPUValidationError', 'NavigationPreloadManager',
+    'ServiceWorkerRegistration', 'StorageManager', 'SubtleCrypto', 'WGSLLanguageFeatures', 'WebTransport',
+    'WebTransportBidirectionalStream', 'WebTransportDatagramDuplexStream', 'WebTransportError', 'BarcodeDetector',
+    'FileSystemDirectoryHandle', 'FileSystemFileHandle', 'FileSystemHandle', 'FileSystemWritableFileStream',
+    'FileSystemObserver', 'Lock', 'LockManager', 'PressureObserver', 'PressureRecord', 'StorageBucket',
+    'StorageBucketManager'
+  ],
+  dedicated: [
+    'RTCTransformEvent', 'RTCRtpScriptTransformer', 'RTCDataChannel', 'Worker', 'VideoFrame', 'VideoColorSpace',
+    'SourceBufferList', 'SourceBuffer', 'RTCEncodedVideoFrame', 'RTCEncodedAudioFrame', 'MediaSourceHandle',
+    'MediaSource', 'EncodedVideoChunk', 'EncodedAudioChunk', 'DedicatedWorkerGlobalScope', 'AudioData', 'onmessage',
+    'onmessageerror', 'cancelAnimationFrame', 'postMessage', 'requestAnimationFrame', 'onrtctransform',
+    'AudioDecoder', 'AudioEncoder', 'FileSystemSyncAccessHandle', 'IdleDetector', 'ImageDecoder', 'ImageTrack',
+    'ImageTrackList', 'VideoDecoder', 'VideoEncoder', 'HID', 'HIDConnectionEvent', 'HIDDevice', 'HIDInputReportEvent',
+    'Serial', 'SerialPort', 'USB', 'USBAlternateInterface', 'USBConfiguration', 'USBConnectionEvent', 'USBDevice',
+    'USBEndpoint', 'USBInTransferResult', 'USBInterface', 'USBIsochronousInTransferPacket',
+    'USBIsochronousInTransferResult', 'USBIsochronousOutTransferPacket', 'USBIsochronousOutTransferResult',
+    'USBOutTransferResult'
+  ],
+  shared: [
+    'SharedWorkerGlobalScope', 'onconnect'
+  ],
+};
+
+// Turns a realm made by op_worker_realm_create into a worker global scope, the
+// way Chrome's looks from inside: DedicatedWorkerGlobalScope (or Shared...) ->
+// WorkerGlobalScope -> EventTarget, the WorkerGlobalScope members on its
+// prototype, WorkerNavigator/WorkerLocation, and none of the window-only
+// globals (window, document, DOM interfaces). Returns the page's handle:
+// run(code), deliver(data), connect() and terminate().
+globalThis.__obscura_workerInit = function(kind, url, name, toParent) {
+  delete globalThis.__obscura_workerInit;
+  delete globalThis.__obscura_workerRealm;
+  const shared = kind === 'shared';
+  const later = setTimeout;
+  const clone = globalThis.structuredClone;
+  const MsgEvent = globalThis.MessageEvent;
+  const Channel = globalThis.MessageChannel;
+  const indirectEval = eval;
+  const hidden = new Set(globalThis.__obscura_hide_list || []);
+  let closed = false;
+  const native = (fn, n) => _markNativeAs(fn, 'function ' + n + '() { [native code] }');
+  const getter = (fn, n) => _markNativeAs(fn, 'function get ' + n + '() { [native code] }');
+  const setter = (fn, n) => _markNativeAs(fn, 'function set ' + n + '() { [native code] }');
+  const illegal = (n) => { const C = { [n]: function() { throw new TypeError('Illegal constructor'); } }[n]; _markNative(C); return C; };
+  const iface = (n, parent) => {
+    const C = illegal(n);
+    C.prototype = Object.create(parent);
+    Object.defineProperty(C.prototype, 'constructor', { value: C, writable: true, configurable: true });
+    Object.defineProperty(C.prototype, Symbol.toStringTag, { value: n, configurable: true });
+    return C;
+  };
+
+  // WorkerLocation for the script URL.
+  const parsed = new URL(url);
+  const WL = iface('WorkerLocation', Object.prototype);
+  ['origin', 'protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash', 'href'].forEach((k) => {
+    Object.defineProperty(WL.prototype, k, { get: getter(function() { return parsed[k]; }, k), set: undefined, enumerable: true, configurable: true });
+  });
+  Object.defineProperty(WL.prototype, 'toString', { value: native(function toString() { return parsed.href; }, 'toString'), writable: true, enumerable: true, configurable: true });
+  delete WL.prototype.constructor;
+  Object.defineProperty(WL.prototype, 'constructor', { value: WL, writable: true, configurable: true });
+  const location = Object.create(WL.prototype);
+
+  // WorkerNavigator: Chrome's worker member list, values from this realm's navigator.
+  const nav = globalThis.navigator;
+  const NP = Object.getPrototypeOf(nav);
+  const WN = iface('WorkerNavigator', Object.prototype);
+  const navMembers = shared
+    ? ['hardwareConcurrency', 'appCodeName', 'appName', 'appVersion', 'platform', 'product', 'userAgent', 'language', 'languages', 'onLine', 'connection', 'mediaCapabilities', 'permissions', 'deviceMemory', 'userAgentData', 'locks', 'storage', 'gpu', 'storageBuckets']
+    : ['hardwareConcurrency', 'appCodeName', 'appName', 'appVersion', 'platform', 'product', 'userAgent', 'language', 'languages', 'onLine', 'connection', 'hid', 'mediaCapabilities', 'permissions', 'serial', 'usb', 'deviceMemory', 'userAgentData', 'locks', 'storage', 'gpu', 'storageBuckets'];
+  navMembers.forEach((k) => {
+    let d = null;
+    for (let p = NP; p && !d; p = Object.getPrototypeOf(p)) d = Object.getOwnPropertyDescriptor(p, k);
+    if (!d) return;
+    Object.defineProperty(WN.prototype, k, d);
+  });
+  // Chrome's order puts constructor after `connection`.
+  const navTail = {};
+  navMembers.slice(navMembers.indexOf('connection') + 1).forEach((k) => {
+    const d = Object.getOwnPropertyDescriptor(WN.prototype, k);
+    if (d) { navTail[k] = d; delete WN.prototype[k]; }
+  });
+  delete WN.prototype.constructor;
+  Object.defineProperty(WN.prototype, 'constructor', { value: WN, writable: true, configurable: true });
+  Object.keys(navTail).forEach((k) => Object.defineProperty(WN.prototype, k, navTail[k]));
+  Object.setPrototypeOf(nav, WN.prototype);
+
+  // Performance in a worker has no document timing.
+  const PP = globalThis.Performance && Performance.prototype;
+  if (PP) ['timing', 'navigation', 'memory', 'eventCounts', 'interactionCount'].forEach((k) => { delete PP[k]; });
+  if (typeof _perfTimeline === 'function' && _perfTimeline.reset) _perfTimeline.reset();
+
+  // Global scope interfaces.
+  const WGS = iface('WorkerGlobalScope', EventTarget.prototype);
+  const Scope = iface(shared ? 'SharedWorkerGlobalScope' : 'DedicatedWorkerGlobalScope', WGS.prototype);
+  ['TEMPORARY', 'PERSISTENT'].forEach((k, i) => Object.defineProperty(Scope.prototype, k, { value: i, enumerable: true }));
+  const lastCtor = (C) => { delete C.prototype.constructor; Object.defineProperty(C.prototype, 'constructor', { value: C, writable: true, configurable: true }); };
+  lastCtor(Scope);
+  const handlers = {};
+  const handlerAttr = (obj, k) => Object.defineProperty(obj, k, {
+    get: getter(function() { return handlers[k] || null; }, k),
+    set: setter(function(v) { handlers[k] = typeof v === 'function' ? v : null; }, k),
+    enumerable: true, configurable: true,
+  });
+  const values = {
+    self: globalThis, location, navigator: nav, performance: globalThis.performance, crypto: globalThis.crypto,
+    origin: parsed.origin, isSecureContext: globalThis.isSecureContext !== false, crossOriginIsolated: false,
+    indexedDB: globalThis.indexedDB, caches: globalThis.caches, fonts: globalThis.fonts || document.fonts,
+    scheduler: globalThis.scheduler, trustedTypes: globalThis.trustedTypes,
+  };
+  const importScripts = native(function importScripts() {
+    for (const u of arguments) {
+      const src = new URL(String(u), parsed.href).href;
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', src, false);
+      xhr.send();
+      if (xhr.status < 200 || xhr.status >= 300) throw new DOMException("Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at '" + src + "' failed to load.", 'NetworkError');
+      indirectEval(xhr.responseText);
+    }
+  }, 'importScripts');
+  const methods = { importScripts };
+  ['createImageBitmap', 'fetch', 'atob', 'btoa', 'queueMicrotask', 'reportError', 'structuredClone', 'clearInterval',
+   'clearTimeout', 'setInterval', 'setTimeout'].forEach((k) => { if (typeof globalThis[k] === 'function') methods[k] = globalThis[k]; });
+  ['self', 'location', 'onerror', 'onlanguagechange', 'navigator', 'onrejectionhandled', 'onunhandledrejection', 'origin',
+   'performance', 'trustedTypes', 'crypto', 'indexedDB', 'fonts', 'createImageBitmap', 'fetch', 'importScripts',
+   'constructor', 'isSecureContext', 'crossOriginIsolated', 'scheduler', 'caches', 'atob', 'btoa', 'queueMicrotask',
+   'reportError', 'structuredClone', 'clearInterval', 'clearTimeout', 'setInterval', 'setTimeout'].forEach((k) => {
+    const P = WGS.prototype;
+    if (k === 'constructor') { delete P.constructor; Object.defineProperty(P, k, { value: WGS, writable: true, configurable: true }); return; }
+    if (/^on/.test(k)) { handlerAttr(P, k); return; }
+    if (k in methods) { Object.defineProperty(P, k, { value: methods[k], writable: true, enumerable: true, configurable: true }); return; }
+    if (k in values) {
+      const v = values[k];
+      if (v === undefined) return;
+      Object.defineProperty(P, k, { get: getter(function() { return v; }, k), set: k === 'self' || k === 'location' || k === 'navigator' || k === 'origin' ? undefined : setter(function() {}, k), enumerable: true, configurable: true });
+    }
+  });
+
+  // Drop everything a Chrome worker does not have as an own global.
+  const keep = new Set(_WORKER_GLOBALS.common.concat(shared ? _WORKER_GLOBALS.shared : _WORKER_GLOBALS.dedicated));
+  for (const k of Object.getOwnPropertyNames(globalThis)) {
+    if (keep.has(k) || hidden.has(k) || k.startsWith('__obscura') || k.startsWith('_')) continue;
+    try { delete globalThis[k]; } catch (_e) {}
+  }
+  [WGS, Scope, WL, WN].forEach((C) => Object.defineProperty(globalThis, C.name, { value: C, writable: true, configurable: true }));
+  Object.setPrototypeOf(globalThis, Scope.prototype);
+
+  // Own members of the scope object.
+  Object.defineProperty(globalThis, 'name', { get: getter(function() { return name; }, 'name'), set: undefined, enumerable: true, configurable: true });
+  const fire = (type, ev) => {
+    if (closed) return;
+    const h = handlers['on' + type];
+    if (h) { try { h.call(globalThis, ev); } catch (e) { console.error(e); } }
+    globalThis.dispatchEvent(ev);
+  };
+  if (shared) {
+    handlerAttr(globalThis, 'onconnect');
+  } else {
+    ['onmessage', 'onmessageerror'].forEach((k) => handlerAttr(globalThis, k));
+    Object.defineProperty(globalThis, 'postMessage', { value: native(function postMessage(message) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'postMessage' on 'DedicatedWorkerGlobalScope': 1 argument required, but only 0 present.");
+      if (!closed) toParent.message(clone(message));
+    }, 'postMessage'), writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(globalThis, 'requestAnimationFrame', { value: native(function requestAnimationFrame(cb) { return later(() => cb(performance.now()), 16); }, 'requestAnimationFrame'), writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { value: native(function cancelAnimationFrame(id) { clearTimeout(id); }, 'cancelAnimationFrame'), writable: true, enumerable: true, configurable: true });
+  }
+  Object.defineProperty(globalThis, 'close', { value: native(function close() { closed = true; if (toParent.close) toParent.close(); }, 'close'), writable: true, enumerable: true, configurable: true });
+
+  const report = (e) => {
+    const message = e && e.message !== undefined ? 'Uncaught ' + (e.name || 'Error') + ': ' + e.message : 'Uncaught ' + String(e);
+    if (toParent.error) toParent.error(message, parsed.href, 0, 0);
+  };
+  return {
+    run(code) {
+      // Something reinstalls an own queueMicrotask after init; Chrome's is on the prototype.
+      if (!keep.has('queueMicrotask')) delete globalThis.queueMicrotask;
+      try { indirectEval(String(code)); } catch (e) { report(e); }
+    },
+    deliver(data) {
+      const value = clone(data);
+      later(() => fire('message', new MsgEvent('message', { data: value })), 0);
+    },
+    connect() {
+      const ch = new Channel();
+      later(() => fire('connect', new MsgEvent('connect', { data: '', ports: [ch.port2], source: ch.port2 })), 0);
+      return ch.port1;
+    },
+    terminate() { closed = true; },
+  };
+};
+
 globalThis.__obscura_init = function() {
   // The host sets __obscura_frameId on a frame realm before calling this.
   _realmFrameId = globalThis.__obscura_frameId >>> 0;
@@ -16760,8 +16988,12 @@ globalThis.__obscura_init = function() {
   globalThis.__virtualUrl = null;
   _installWasmStreamingFallback();
 
+  if (!globalThis.__obscura_workerRealm) {
+    try { Object.defineProperty(globalThis, 'location', { configurable: false }); } catch (_e) {}
+  }
   const documentNid = +_dom("document_node_id");
   globalThis.document = new Document(documentNid);
+  _offscreenDoc = globalThis.document;
   if (typeof HTMLDocument === 'function') Object.setPrototypeOf(globalThis.document, HTMLDocument.prototype);
   // parentNode on <html> reaches the backing document node. Keep that wrapper
   // canonical so getRootNode(), isConnected, and identity comparisons return

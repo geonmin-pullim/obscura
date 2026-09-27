@@ -667,6 +667,186 @@ impl RealmStates {
     }
 }
 
+/// The page realm's bound op table, kept so realms created later from script
+/// (worker scopes) can be given the same ops a frame realm gets.
+pub struct RealmOpsTable(pub v8::Global<v8::Value>);
+
+/// Frame ids for worker realms, above any id the page hands to frames.
+static NEXT_WORKER_REALM_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x4000_0000);
+
+/// Creates a worker's global scope: a realm restored from the startup snapshot
+/// in this isolate, set up like a frame realm (the page's ops, identity,
+/// security token and network resources) and then turned into a worker scope
+/// by the bootstrap's `__obscura_workerInit(kind, url, name, toParent)`.
+/// Returns what that init returns (the page-side handle), or null.
+///
+/// Workers used to run with `with (scope) eval(code)` in the page's own realm,
+/// so worker code saw `window`, `document` and the DOM, and `self` was a plain
+/// object: an anti-bot script that re-collects the environment in a worker
+/// sees a page, not a worker.
+#[op2]
+pub fn op_worker_realm_create<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    state: Rc<RefCell<OpState>>,
+    #[string] kind: String,
+    #[string] url: String,
+    #[string] name: String,
+    to_parent: v8::Local<'s, v8::Value>,
+) -> v8::Local<'s, v8::Value> {
+    use deno_core::{CONTEXT_STATE_SLOT_INDEX, MODULE_MAP_SLOT_INDEX};
+    const IDENTITY_GLOBALS: [&str; 9] = [
+        "__obscura_fp_seed", "__obscura_languages", "__obscura_ua", "__obscura_platform",
+        "__obscura_ua_platform", "__obscura_ua_platform_version", "__obscura_stealth",
+        "__obscura_geo_lat", "__obscura_geo_lon",
+    ];
+    let null: v8::Local<v8::Value> = v8::null(scope).into();
+    // Borrow the op state only briefly: the worker's init script below calls
+    // ops that borrow it again.
+    let (ops, registry, page) = {
+        let state = state.borrow();
+        let (Some(ops), Some(registry)) = (
+            state.try_borrow::<RealmOpsTable>().map(|table| table.0.clone()),
+            state.try_borrow::<Rc<RefCell<RealmStates>>>().cloned(),
+        ) else {
+            return null;
+        };
+        (ops, registry, state.borrow::<SharedState>().clone())
+    };
+    let parent = scope.get_current_context();
+    let Some(context) = v8::Context::from_snapshot(scope, 1, v8::ContextOptions::default())
+        .or_else(|| v8::Context::from_snapshot(scope, 0, v8::ContextOptions::default()))
+    else {
+        return null;
+    };
+    // SAFETY: as in ObscuraJsRuntime::share_deno_context_state_with_realm: the
+    // page context's slots outlive every child realm and are only aliased.
+    unsafe {
+        let cs = parent.get_aligned_pointer_from_embedder_data(CONTEXT_STATE_SLOT_INDEX);
+        let mm = parent.get_aligned_pointer_from_embedder_data(MODULE_MAP_SLOT_INDEX);
+        context.set_aligned_pointer_in_embedder_data(CONTEXT_STATE_SLOT_INDEX, cs);
+        context.set_aligned_pointer_in_embedder_data(MODULE_MAP_SLOT_INDEX, mm);
+    }
+    // A worker is same-origin with the page that created it.
+    let token = parent.get_security_token(scope);
+    context.set_security_token(token);
+
+    let parent_global = parent.global(scope);
+    let identity: Vec<(&str, v8::Local<v8::Value>)> = IDENTITY_GLOBALS
+        .iter()
+        .filter_map(|name| {
+            let key = v8::String::new(scope, name)?;
+            let value = parent_global.get(scope, key.into())?;
+            (!value.is_undefined()).then_some((*name, value))
+        })
+        .collect();
+
+    let worker_id = NEXT_WORKER_REALM_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut worker_state = ObscuraState::new();
+    worker_state.dom = Some(obscura_dom::parse_html("<html><head></head><body></body></html>"));
+    {
+        let page = page.borrow();
+        worker_state.url = page.url.clone();
+        share_page_resources(&page, &mut worker_state);
+    }
+    worker_state.frame_id = worker_id;
+    registry.borrow_mut().register(
+        v8::Global::new(scope, context),
+        worker_id,
+        Rc::new(RefCell::new(worker_state)),
+    );
+
+    let handle = {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let global = context.global(scope);
+        let (Some(handoff_key), Some(ops_key), Some(deno_key)) = (
+            v8::String::new(scope, "__obscura_core_handoff"),
+            v8::String::new(scope, "ops"),
+            v8::String::new(scope, "Deno"),
+        ) else {
+            return null;
+        };
+        let target = global
+            .get(scope, handoff_key.into())
+            .and_then(|core| core.to_object(scope))
+            .and_then(|core| core.get(scope, ops_key.into()))
+            .and_then(|ops| ops.to_object(scope));
+        let source = v8::Local::new(scope, ops).to_object(scope);
+        let (Some(target), Some(source)) = (target, source) else {
+            return null;
+        };
+        if let Some(names) = source.get_own_property_names(scope, Default::default()) {
+            for index in 0..names.length() {
+                if let Some(key) = names.get_index(scope, index) {
+                    if let Some(value) = source.get(scope, key) {
+                        target.set(scope, key, value);
+                    }
+                }
+            }
+        }
+        global.delete(scope, handoff_key.into());
+        global.delete(scope, deno_key.into());
+        for (name, value) in identity {
+            if let Some(key) = v8::String::new(scope, name) {
+                global.set(scope, key.into(), value);
+            }
+        }
+        for (name, value) in [("__obscura_frameId", worker_id), ("__obscura_parentFrameId", 0)] {
+            if let Some(key) = v8::String::new(scope, name) {
+                let value = v8::Integer::new_from_unsigned(scope, value);
+                global.set(scope, key.into(), value.into());
+            }
+        }
+        v8::tc_scope!(let tc, scope);
+        let init = v8::String::new(tc, "globalThis.__obscura_workerRealm = true; globalThis.__obscura_init(); globalThis.__obscura_workerInit")
+            .and_then(|code| v8::Script::compile(tc, code, None))
+            .and_then(|script| script.run(tc))
+            .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
+        let Some(init) = init else {
+            tracing::warn!("worker realm init failed: {}", tc.exception().map(|e| e.to_rust_string_lossy(tc)).unwrap_or_default());
+            return null;
+        };
+        let args = [
+            v8::String::new(tc, &kind).map(Into::into).unwrap_or(null),
+            v8::String::new(tc, &url).map(Into::into).unwrap_or(null),
+            v8::String::new(tc, &name).map(Into::into).unwrap_or(null),
+            to_parent,
+        ];
+        let receiver = global.into();
+        match init.call(tc, receiver, &args) {
+            Some(value) => v8::Global::new(tc, value),
+            None => {
+                tracing::warn!("worker scope init threw: {}", tc.exception().map(|e| e.to_rust_string_lossy(tc)).unwrap_or_default());
+                return null;
+            }
+        }
+    };
+    v8::Local::new(scope, handle)
+}
+
+/// Gives a child realm's state (frame or worker) the resources its page owns:
+/// cookie jar, HTTP client, callbacks and the stealth transport.
+pub(crate) fn share_page_resources(parent: &ObscuraState, frame: &mut ObscuraState) {
+        frame.cookie_jar = parent.cookie_jar.clone();
+        frame.http_client = parent.http_client.clone();
+        frame.callbacks = parent.callbacks.clone();
+        frame.encoding = parent.encoding.clone();
+        frame.blocked_urls = parent.blocked_urls.clone();
+        frame.intercept_enabled = parent.intercept_enabled;
+        frame.page_in_flight = parent.page_in_flight.clone();
+        #[cfg(feature = "stealth")]
+        {
+            frame.stealth_client = parent.stealth_client.clone();
+        }
+        // A frame realm shares the page transport, so its renderer cache must
+        // not open synchronous requests either. Frame geometry currently
+        // resolves against the main document's renderer state, so frame-scoped
+        // background loading is not wired up here.
+        #[cfg(feature = "render")]
+        if crate::ops::has_page_transport(&parent) {
+            frame.render_resources.set_sync_loading_enabled(false);
+        }
+    }
+
 /// The document of the realm a DOM call came from, named rather than inferred.
 ///
 /// A wrapper's methods live on its own realm's prototypes, so the code running
@@ -6245,6 +6425,7 @@ pub fn build_extension() -> Extension {
         op_navigate(),
         op_frame_document_ready(),
         op_post_frame_message(),
+        op_worker_realm_create(),
         op_sleep(),
         op_async_runtime_available(),
         op_posted_task(),

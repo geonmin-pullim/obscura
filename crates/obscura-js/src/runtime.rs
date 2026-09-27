@@ -652,6 +652,13 @@ impl ObscuraJsRuntime {
         // Take the op table before any page script can run, and drop the global
         // that exposed it in the same step.
         instance.ops_handoff = instance.take_ops_handoff();
+        if let Some(ops) = instance.ops_handoff.clone() {
+            instance
+                .js_runtime
+                .op_state()
+                .borrow_mut()
+                .put(crate::ops::RealmOpsTable(ops));
+        }
         #[cfg(test)]
         instance.expose_ops_for_tests();
 
@@ -958,26 +965,7 @@ impl ObscuraJsRuntime {
     /// client, callbacks and the stealth transport. A frame shares these with
     /// its page, exactly as it shares them in a browser.
     pub(crate) fn share_resources_with(&self, frame: &mut ObscuraState) {
-        let parent = self.state.borrow();
-        frame.cookie_jar = parent.cookie_jar.clone();
-        frame.http_client = parent.http_client.clone();
-        frame.callbacks = parent.callbacks.clone();
-        frame.encoding = parent.encoding.clone();
-        frame.blocked_urls = parent.blocked_urls.clone();
-        frame.intercept_enabled = parent.intercept_enabled;
-        frame.page_in_flight = parent.page_in_flight.clone();
-        #[cfg(feature = "stealth")]
-        {
-            frame.stealth_client = parent.stealth_client.clone();
-        }
-        // A frame realm shares the page transport, so its renderer cache must
-        // not open synchronous requests either. Frame geometry currently
-        // resolves against the main document's renderer state, so frame-scoped
-        // background loading is not wired up here.
-        #[cfg(feature = "render")]
-        if crate::ops::has_page_transport(&parent) {
-            frame.render_resources.set_sync_loading_enabled(false);
-        }
+        crate::ops::share_page_resources(&self.state.borrow(), frame);
     }
 
     /// The origin of the document this runtime is running, or `"null"` for a
@@ -5291,6 +5279,37 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn worker_runs_in_its_own_worker_scope_realm() {
+        let mut rt = setup_runtime("<html><body></body></html>");
+        rt.execute_script(
+            "worker-scope",
+            r#"
+            globalThis.__workerReplies = [];
+            const source = `postMessage([
+                typeof window, typeof document, typeof Element,
+                Object.prototype.toString.call(self), self instanceof WorkerGlobalScope,
+                Object.prototype.toString.call(navigator), typeof Function('return this')().document,
+                Object.prototype.toString.call(new OffscreenCanvas(2, 2).getContext('2d')),
+            ]);`;
+            const url = URL.createObjectURL(new Blob([source], { type: 'application/javascript' }));
+            const worker = new Worker(url);
+            worker.onmessage = event => __workerReplies.push(event.data, event instanceof MessageEvent);
+        "#,
+        )
+        .unwrap();
+        rt.run_event_loop_bounded(100).await.unwrap();
+        assert_eq!(
+            rt.evaluate("__workerReplies").unwrap(),
+            serde_json::json!([
+                ["undefined", "undefined", "undefined", "[object DedicatedWorkerGlobalScope]", true,
+                 "[object WorkerNavigator]", "undefined", "[object OffscreenCanvasRenderingContext2D]"],
+                true
+            ])
+        );
+        assert_eq!(rt.evaluate("typeof document").unwrap(), serde_json::json!("object"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn worker_queues_messages_while_source_is_loading() {
         let mut rt = setup_runtime("<html><body></body></html>");
         rt.execute_script("worker-queued-messages", r#"
@@ -5403,7 +5422,8 @@ mod tests {
         );
         assert_eq!(
             rt.evaluate("__workerErrors").unwrap(),
-            serde_json::json!(["initialization failed"])
+            // Chrome's ErrorEvent message for an uncaught worker exception.
+            serde_json::json!(["Uncaught Error: initialization failed"])
         );
         rt.execute_script(
             "worker-cleanup",
