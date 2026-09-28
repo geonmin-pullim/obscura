@@ -418,7 +418,24 @@ pub async fn handle(
                             let js = "(function() {\
                                 var target = document.activeElement;\
                                 if (!target) return;\
-                                target.dispatchEvent(globalThis.__obscura_markTrusted(new KeyboardEvent('keypress', {bubbles:true,key:'Enter',code:'Enter'})));\
+                                var pressed = target.dispatchEvent(globalThis.__obscura_markTrusted(new KeyboardEvent('keypress', {bubbles:true,cancelable:true,composed:true,view:globalThis,key:'Enter',code:'Enter',keyCode:13,charCode:13,which:13})));\
+                                if (!pressed) return;\
+                                var link = target.closest ? target.closest('a[href]') : null;\
+                                var isButton = target.localName === 'button' || (target.localName === 'input' && /^(submit|image|button|reset)$/i.test(target.type || ''));\
+                                if (link || isButton) {\
+                                    /* Chrome activates a focused link or button on Enter: a trusted click (PointerEvent, pointerId -1, detail 0), then the default action. */\
+                                    var host = link || target;\
+                                    var click = globalThis.__obscura_markTrusted(new PointerEvent('click', {bubbles:true,cancelable:true,composed:true,view:globalThis,pointerId:-1,pointerType:'',detail:0}));\
+                                    if (!host.dispatchEvent(click)) return;\
+                                    if (link) {\
+                                        var href = link.getAttribute('href');\
+                                        if (href && !href.startsWith('#') && !/^javascript:/i.test(href)) location.assign(href);\
+                                    } else if (target.type !== 'button' && target.type !== 'reset') {\
+                                        var bform = target.form || (target.closest && target.closest('form'));\
+                                        if (bform) { try { bform.requestSubmit(target); } catch(e) {} }\
+                                    }\
+                                    return;\
+                                }\
                                 if (target.localName === 'textarea') {\
                                     var value = target.value || '';\
                                     var start = target.selectionStart, end = target.selectionEnd;\
