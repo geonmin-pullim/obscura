@@ -169,13 +169,29 @@ const _nativeStr = new Map();
 const _origToString = Function.prototype.toString;
 // Method syntax matches the native function's non-constructible shape and
 // does not add an own `prototype` property.
+const _captureStackTrace = Error.captureStackTrace;
 const _functionToString = {
   toString() {
     if (_nativeStr.has(this)) { return _nativeStr.get(this); }
     if (_nativeFns.has(this)) {
       return `function ${this.name || ''}() { [native code] }`;
     }
-    return _origToString.call(this);
+    try {
+      return _origToString.call(this);
+    } catch (e) {
+      // A non-function receiver throws. Chrome's stack shows the builtin's
+      // frame ("at Object.toString (<anonymous>)") and then the caller; ours
+      // also had this wrapper's frame (<obscura:bootstrap>), a known check
+      // for patched natives. Keep the builtin line, drop the wrapper frame.
+      if (e && typeof e.stack === 'string' && typeof _captureStackTrace === 'function') {
+        const nativeLine = e.stack.split('\n')[1];
+        _captureStackTrace(e, _functionToString);
+        const lines = String(e.stack).split('\n');
+        if (nativeLine) lines.splice(1, 0, nativeLine);
+        e.stack = lines.join('\n');
+      }
+      throw e;
+    }
   },
 }.toString;
 Function.prototype.toString = _functionToString;

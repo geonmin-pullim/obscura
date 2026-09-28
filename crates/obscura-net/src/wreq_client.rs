@@ -58,6 +58,18 @@ impl wreq::dns::Resolve for SsrfGuardResolver {
 }
 
 #[cfg(feature = "stealth")]
+/// Chrome 153's Trust Anchor IDs (TLS extension 0xca34) list, captured from
+/// its ClientHello. Without it the stealth ClientHello has one extension
+/// fewer than Chrome's, which shows in JA4 (t13d1517 vs t13d1518).
+const CHROME_TRUST_ANCHOR_IDS: &str = "0582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f";
+
+fn chrome_trust_anchor_ids() -> Vec<u8> {
+    (0..CHROME_TRUST_ANCHOR_IDS.len())
+        .step_by(2)
+        .filter_map(|i| u8::from_str_radix(&CHROME_TRUST_ANCHOR_IDS[i..i + 2], 16).ok())
+        .collect()
+}
+
 pub const STEALTH_USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 
@@ -271,6 +283,7 @@ impl StealthHttpClient {
         proxy_url: Option<&str>,
         allow_private_network: bool,
     ) -> Self {
+        wreq::tls::set_requested_trust_anchors(chrome_trust_anchor_ids());
         let emulation_opts = wreq_util::Emulation::builder()
             .profile(wreq_util::Profile::Chrome149)
             .platform(wreq_util::Platform::Windows)

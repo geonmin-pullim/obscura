@@ -62,6 +62,12 @@ taffy = { path = "vendor/taffy" }
 # Carry the same canonical variable-font coordinates through shaping and
 # rasterization until the upstream API exposes them.
 cosmic-text = { path = "vendor/cosmic-text" }
+# Chrome's Trust Anchor IDs TLS extension (0xca34), which wreq exposes no
+# option for (see vendor/wreq/src/tls/conn.rs, "obscura patch").
+wreq = { path = "vendor/wreq" }
+# Chrome 15x signature_algorithms: GREASE + ML-DSA code points (see
+# vendor/btls-sys/deps/boringssl/ssl/extensions.cc, "obscura patch").
+btls-sys = { path = "vendor/btls-sys" }
 
 # Unwinding (the Rust default) is REQUIRED for the anti-panic protocol: ops wrap
 # their bodies in std::panic::catch_unwind so a panic degrades to an error return
