@@ -19,9 +19,10 @@ const __obscuraCore = globalThis.Deno.core;
   var _names = [
     // runtime-set by Rust (runtime.rs / page.rs)
     '__obscura_errors', '__obscura_init', '__obscura_hide_list',
+    '__obscura_viewport_w', '__obscura_viewport_h', '__obscura_screen_emulated', '__currentScriptNid',
     '__obscura_objects', '__obscura_oid', '__obscura_ua',
     '__obscura_platform', '__obscura_ua_platform', '__obscura_ua_platform_version',
-    '__obscura_stealth', '__obscura_languages', '__obscura_fp_seed', '__obscura_markTrusted', '__obscura_core_handoff',
+    '__obscura_stealth', '__obscura_languages', '__obscura_fp_seed', '__obscura_markTrusted', '__obscura_userGesture', '__obscura_core_handoff',
     '__obscura_frameId', '__obscura_parentFrameId', '__obscura_frameWindows',
     '__obscura_frameObjects', '__obscura_frameElements', '__obscura_deliverMessage',
     '__obscura_liveFrameIds', '__obscura_forgetFrame',
@@ -38,7 +39,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
     '__obscura_perfMark', '__obscura_nav', '__obscura_perfResource', '_perfRecordResource', '_perfNowInternal', '_fetchInitiator', '_fetchInternal', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
-    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_xhrSlots', '_xhrToken', '_xhrSlot', '_xhrDefine', '_xhrHandler', '_xhrReorderCtor', '_xhrFire', '_xhrHasListeners', '_xhrState', '_ctx2dImpl', '_ctx2dProto', '_ctx2dPub', '_ctx2dPublic', '_CSS_COLORS', '_lateShapes', '_iSetTimeout', '_iQueueMicrotask', '_iStructuredClone', '_iGetAttr', '_iSetAttr', '_iDocQS', '_iCreateElement', '_iGetContext', '_audioRate', '_nativeMethods', '_icall', '_snapshotNativeMethods', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
+    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_xhrSlots', '_xhrToken', '_xhrSlot', '_xhrDefine', '_xhrHandler', '_xhrReorderCtor', '_xhrFire', '_xhrHasListeners', '_xhrState', '_ctx2dImpl', '_ctx2dProto', '_ctx2dPub', '_ctx2dPublic', '_CSS_COLORS', '_lateShapes', '_iSetTimeout', '_iQueueMicrotask', '_iStructuredClone', '_iGetAttr', '_iSetAttr', '_iDocQS', '_iCreateElement', '_iGetContext', '_audioRate', '_nativeMethods', '_icall', '_snapshotNativeMethods', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent', '_activation', '_nodeSlots', '_protoHidden', '_docLocation',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -213,6 +214,9 @@ _nativeFns.add(_functionToString);
 // reflection APIs when they target the global object. The canonical name set is
 // __obscura_hide_list, precomputed at snapshot-build time; referencing it lazily
 // means the list is already populated by the time any page calls these.
+// DOM interface prototypes whose obscura-internal members (leading '_') the
+// reflection APIs leave out; filled at the end of bootstrap.
+var _protoHidden = new WeakSet();
 (function _hideInternalsFromReflection() {
   var _cache = null, _cacheLen = -1;
   function _set() {
@@ -226,6 +230,7 @@ _nativeFns.add(_functionToString);
   }
   function _isGlobal(t) { return t === globalThis; }
   function _filter(t, names) {
+    if (_protoHidden.has(t)) { return names.filter(function(k) { return typeof k !== 'string' || k.charAt(0) !== '_'; }); }
     if (!_isGlobal(t)) { return names; }
     var set = _set();
     if (!set) { return names; }
@@ -245,6 +250,7 @@ _nativeFns.add(_functionToString);
   define(Object, 'keys', function keys(t) { return _filter(t, _oKeys(t)); });
   define(Object, 'getOwnPropertyDescriptors', function getOwnPropertyDescriptors(t) {
     var all = _oGOPDs(t);
+    if (_protoHidden.has(t)) { _oGOPN(all).forEach(function(k) { if (k.charAt(0) === '_') delete all[k]; }); }
     if (_isGlobal(t)) {
       var set = _set();
       if (set) { var ks = _oGOPN(all); for (var i = 0; i < ks.length; i++) { if (set.has(ks[i])) { delete all[ks[i]]; } } }
@@ -10663,6 +10669,10 @@ _evInterface(CompositionEvent, ['data', 'initCompositionEvent', 'constructor'], 
   ['ClipboardEvent', Event, [['clipboardData', null]], ['clipboardData', 'constructor']],
   ['SubmitEvent', Event, [['submitter', null]], ['submitter', 'constructor']],
   ['CloseEvent', Event, [['wasClean', false], ['code', 0], ['reason', '']], ['wasClean', 'code', 'reason', 'constructor']],
+  ['DeviceOrientationEvent', Event, [['alpha', null], ['beta', null], ['gamma', null], ['absolute', false]], ['alpha', 'beta', 'gamma', 'absolute', 'constructor']],
+  ['DeviceMotionEvent', Event, [['acceleration', null], ['accelerationIncludingGravity', null], ['rotationRate', null], ['interval', 0]],
+   ['acceleration', 'accelerationIncludingGravity', 'rotationRate', 'interval', 'constructor']],
+  ['CookieChangeEvent', Event, [['changed', Object.freeze([])], ['deleted', Object.freeze([])]], ['changed', 'deleted', 'constructor']],
   ['DragEvent', MouseEvent, [['dataTransfer', null]], ['dataTransfer', 'constructor']],
   ['SecurityPolicyViolationEvent', Event, [['documentURI', ''], ['referrer', ''], ['blockedURI', ''], ['violatedDirective', ''],
     ['effectiveDirective', ''], ['originalPolicy', ''], ['disposition', 'enforce'], ['sourceFile', ''], ['statusCode', 0],
@@ -14191,7 +14201,7 @@ if (typeof Document !== 'undefined' && typeof Document.parseHTMLUnsafe !== 'func
     }
   }
   class AudioContext extends BaseAudioContext {
-    constructor(options) { super(KEY, (options && options.sampleRate) || _fp('audioSampleRate'), 'suspended'); }
+    constructor(options) { super(KEY, (options && options.sampleRate) || _fp('audioSampleRate'), _activation.has ? 'running' : 'suspended'); }
     get baseLatency() { return 0.01; }
     get outputLatency() { return 0; }
     getOutputTimestamp() { return { contextTime: 0, performanceTime: 0 }; }
@@ -16308,6 +16318,10 @@ var _perfTimeline = null;
 var _perfRecordResource = null;
 // Interface-shape passes that must see every shim; run at the end of bootstrap.
 var _lateShapes = [];
+// document.location descriptor, installed on the document itself.
+var _docLocation = null;
+// Sticky/transient user activation (HTML): set by trusted input events.
+var _activation = { has: false, until: 0 };
 // Originals of page-visible APIs, captured when bootstrap ends and before any
 // page script, for obscura's own code: a page that wraps these must not see
 // internal calls (Chrome makes none). Null during bootstrap itself.
@@ -17014,7 +17028,8 @@ var _fetchInitiator = null;
     };
     var ET = EventTarget.prototype;
     var reject = function(name, msg) { return Promise.reject(new DOMException(msg || 'Not allowed.', name || 'NotAllowedError')); };
-    var active = { has: false, until: 0 };
+    var active = _activation;
+    globalThis.__obscura_userGesture = function() { active.has = true; active.until = Date.now() + 5000; };
     var markTrusted = globalThis.__obscura_markTrusted;
     globalThis.__obscura_markTrusted = function(ev) {
       var r = markTrusted(ev);
@@ -17137,8 +17152,170 @@ var _fetchInitiator = null;
   // (captured with Object.getOwnPropertyNames): member order, kinds, function
   // lengths and parent. Existing shim members are kept and reordered; missing
   // ones get inert stand-ins; members Chrome lacks are dropped.
+  // Document.prototype in Chrome's member order, with the members obscura
+  // lacked (visibility/prerendering state, legacy colours, fullscreen, the
+  // remaining on* handlers). location moves onto the document itself, as
+  // Chrome's [LegacyUnforgeable] attribute. document.all reads undefined:
+  // V8's undetectable objects are not reachable from here, and undefined is
+  // what typeof and truthiness checks see in Chrome.
+  _lateShapes.push(function _documentChromeShape() {
+    var ORDER = [["implementation","get"],["URL","get"],["documentURI","get"],["compatMode","get"],["characterSet","get"],["charset","get"],["inputEncoding","get"],["contentType","get"],["doctype","get"],["documentElement","get"],["xmlEncoding","get"],["xmlVersion","getset"],["xmlStandalone","getset"],["domain","getset"],["referrer","get"],["cookie","getset"],["lastModified","get"],["readyState","get"],["title","getset"],["dir","getset"],["body","getset"],["head","get"],["images","get"],["embeds","get"],["plugins","get"],["links","get"],["forms","get"],["scripts","get"],["currentScript","get"],["defaultView","get"],["designMode","getset"],["onreadystatechange","getset"],["anchors","get"],["applets","get"],["fgColor","getset"],["linkColor","getset"],["vlinkColor","getset"],["alinkColor","getset"],["bgColor","getset"],["all","get"],["scrollingElement","get"],["onpointerlockchange","getset"],["onpointerlockerror","getset"],["hidden","get"],["visibilityState","get"],["wasDiscarded","get"],["prerendering","get"],["featurePolicy","get"],["webkitVisibilityState","get"],["webkitHidden","get"],["onbeforecopy","getset"],["onbeforecut","getset"],["onbeforepaste","getset"],["onfreeze","getset"],["onprerenderingchange","getset"],["onresume","getset"],["onsearch","getset"],["onvisibilitychange","getset"],["timeline","get"],["fullscreenEnabled","getset"],["fullscreen","getset"],["onfullscreenchange","getset"],["onfullscreenerror","getset"],["webkitIsFullScreen","get"],["webkitCurrentFullScreenElement","get"],["webkitFullscreenEnabled","get"],["webkitFullscreenElement","get"],["onwebkitfullscreenchange","getset"],["onwebkitfullscreenerror","getset"],["rootElement","get"],["activeViewTransition","get"],["pictureInPictureEnabled","get"],["onabort","getset"],["onbeforeinput","getset"],["onbeforematch","getset"],["onbeforetoggle","getset"],["onblur","getset"],["oncancel","getset"],["oncanplay","getset"],["oncanplaythrough","getset"],["onchange","getset"],["onclick","getset"],["onclose","getset"],["oncommand","getset"],["oncontentvisibilityautostatechange","getset"],["oncontextlost","getset"],["oncontextmenu","getset"],["oncontextrestored","getset"],["oncuechange","getset"],["ondblclick","getset"],["ondrag","getset"],["ondragend","getset"],["ondragenter","getset"],["ondragleave","getset"],["ondragover","getset"],["ondragstart","getset"],["ondrop","getset"],["ondurationchange","getset"],["onemptied","getset"],["onended","getset"],["onerror","getset"],["onfocus","getset"],["onformdata","getset"],["oninput","getset"],["oninvalid","getset"],["onkeydown","getset"],["onkeypress","getset"],["onkeyup","getset"],["onload","getset"],["onloadeddata","getset"],["onloadedmetadata","getset"],["onloadstart","getset"],["onmousedown","getset"],["onmouseenter","getset"],["onmouseleave","getset"],["onmousemove","getset"],["onmouseout","getset"],["onmouseover","getset"],["onmouseup","getset"],["onmousewheel","getset"],["onpause","getset"],["onplay","getset"],["onplaying","getset"],["onprogress","getset"],["onratechange","getset"],["onreset","getset"],["onresize","getset"],["onscroll","getset"],["onscrollend","getset"],["onsecuritypolicyviolation","getset"],["onseeked","getset"],["onseeking","getset"],["onselect","getset"],["onslotchange","getset"],["onstalled","getset"],["onsubmit","getset"],["onsuspend","getset"],["ontimeupdate","getset"],["ontoggle","getset"],["onvolumechange","getset"],["onwaiting","getset"],["onwebkitanimationend","getset"],["onwebkitanimationiteration","getset"],["onwebkitanimationstart","getset"],["onwebkittransitionend","getset"],["onwheel","getset"],["onauxclick","getset"],["ongotpointercapture","getset"],["onlostpointercapture","getset"],["onpointerdown","getset"],["onpointermove","getset"],["onpointerup","getset"],["onpointercancel","getset"],["onpointerover","getset"],["onpointerout","getset"],["onpointerenter","getset"],["onpointerleave","getset"],["onselectstart","getset"],["onselectionchange","getset"],["onanimationcancel","getset"],["onanimationend","getset"],["onanimationiteration","getset"],["onanimationstart","getset"],["ontransitionrun","getset"],["ontransitionstart","getset"],["ontransitionend","getset"],["ontransitioncancel","getset"],["onbeforexrselect","getset"],["oncopy","getset"],["oncut","getset"],["onpaste","getset"],["children","get"],["firstElementChild","get"],["lastElementChild","get"],["childElementCount","get"],["activeElement","get"],["styleSheets","get"],["pointerLockElement","get"],["fullscreenElement","getset"],["adoptedStyleSheets","getset"],["pictureInPictureElement","get"],["customElementRegistry","get"],["fonts","get"],["adoptNode","fn",1],["append","fn",0],["captureEvents","fn",0],["caretPositionFromPoint","fn",2],["caretRangeFromPoint","fn",0],["clear","fn",0],["close","fn",0],["createAttribute","fn",1],["createAttributeNS","fn",2],["createCDATASection","fn",1],["createComment","fn",1],["createDocumentFragment","fn",0],["createElement","fn",1],["createElementNS","fn",2],["createEvent","fn",1],["createExpression","fn",1],["createNSResolver","fn",1],["createNodeIterator","fn",1],["createProcessingInstruction","fn",2],["createRange","fn",0],["createTextNode","fn",1],["createTreeWalker","fn",1],["elementFromPoint","fn",2],["elementsFromPoint","fn",2],["evaluate","fn",2],["execCommand","fn",1],["exitFullscreen","fn",0],["exitPictureInPicture","fn",0],["exitPointerLock","fn",0],["getAnimations","fn",0],["getElementById","fn",1],["getElementsByClassName","fn",1],["getElementsByName","fn",1],["getElementsByTagName","fn",1],["getElementsByTagNameNS","fn",2],["getSelection","fn",0],["hasFocus","fn",0],["hasStorageAccess","fn",0],["hasUnpartitionedCookieAccess","fn",0],["importNode","fn",1],["moveBefore","fn",2],["open","fn",0],["prepend","fn",0],["queryCommandEnabled","fn",1],["queryCommandIndeterm","fn",1],["queryCommandState","fn",1],["queryCommandSupported","fn",1],["queryCommandValue","fn",1],["querySelector","fn",1],["querySelectorAll","fn",1],["releaseEvents","fn",0],["replaceChildren","fn",0],["requestStorageAccess","fn",0],["startViewTransition","fn",0],["webkitCancelFullScreen","fn",0],["webkitExitFullscreen","fn",0],["write","fn",0],["writeln","fn",0],["constructor","ctor"],["fragmentDirective","get"],["onpointerrawupdate","getset"],["browsingTopics","fn",0],["hasPrivateToken","fn",1],["hasRedemptionRecord","fn",1],["onscrollsnapchange","getset"],["onscrollsnapchanging","getset"],["ariaNotify","fn",1]];
+    var P = Document.prototype, saved = {};
+    // Non-configurable members stay where they are.
+    Object.getOwnPropertyNames(P).forEach(function(k) { var d = Object.getOwnPropertyDescriptor(P, k); if (d.configurable) { saved[k] = d; delete P[k]; } });
+    var html = function(sel) { return function() { return HTMLCollection._from(_icall(this, 'querySelectorAll', sel)); }; };
+    var none = function() {};
+    var fp = (function() {
+      var C = iface('PermissionsPolicy');
+      var feats = ['accelerometer', 'ambient-light-sensor', 'autoplay', 'camera', 'clipboard-read', 'clipboard-write', 'encrypted-media', 'fullscreen',
+        'geolocation', 'gyroscope', 'magnetometer', 'microphone', 'midi', 'payment', 'picture-in-picture', 'publickey-credentials-get', 'screen-wake-lock',
+        'sync-xhr', 'usb', 'web-share', 'xr-spatial-tracking'];
+      [['allowedFeatures', 0, function() { return feats.slice(); }], ['allowsFeature', 1, function(f) { return feats.indexOf(String(f)) >= 0; }],
+       ['features', 0, function() { return feats.slice(); }], ['getAllowlistForFeature', 1, function(f) { return feats.indexOf(String(f)) >= 0 ? ['*'] : []; }]]
+        .forEach(function(m) {
+          var f = { [m[0]]: function() { return m[2].apply(this, arguments); } }[m[0]];
+          Object.defineProperty(f, 'length', { value: m[1], configurable: true });
+          Object.defineProperty(C.prototype, m[0], { value: _markNativeAs(f, 'function ' + m[0] + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+        });
+      var ctor = Object.getOwnPropertyDescriptor(C.prototype, 'constructor');
+      delete C.prototype.constructor; Object.defineProperty(C.prototype, 'constructor', ctor);
+      var o = Object.create(C.prototype);
+      return function() { return o; };
+    })();
+    var fragment = (function() { var o = Object.create(iface('FragmentDirective').prototype); return function() { return o; }; })();
+    var colour = function(attr) { return { get: function() { var b = _icall(this, 'body'); return (b && _iGetAttr.call(b, attr)) || ''; }, set: function(v) { var b = _icall(this, 'body'); if (b) _iSetAttr.call(b, attr, String(v)); } }; };
+    var design = 'off';
+    var GET = {
+      xmlEncoding: function() { return null; }, lastModified: function() {
+        var d = new Date(), p = function(n) { return (n < 10 ? '0' : '') + n; };
+        return p(d.getMonth() + 1) + '/' + p(d.getDate()) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+      },
+      images: html('img'), embeds: html('embed'), plugins: html('embed'), links: html('a[href], area[href]'), forms: html('form'),
+      scripts: html('script'), anchors: html('a[name]'), applets: function() { return HTMLCollection._from([]); },
+      all: function() { return undefined; }, wasDiscarded: function() { return false; }, prerendering: function() { return false; },
+      featurePolicy: fp, webkitVisibilityState: function() { return 'visible'; }, webkitHidden: function() { return false; },
+      webkitIsFullScreen: function() { return false; }, webkitCurrentFullScreenElement: function() { return null; },
+      webkitFullscreenEnabled: function() { return true; }, webkitFullscreenElement: function() { return null; },
+      rootElement: function() { return null; }, activeViewTransition: function() { return null; }, pictureInPictureEnabled: function() { return true; },
+      pointerLockElement: function() { return null; }, pictureInPictureElement: function() { return null; },
+      customElementRegistry: function() { return globalThis.customElements || null; }, fragmentDirective: fragment,
+    };
+    var GETSET = {
+      xmlVersion: { get: function() { return null; }, set: none }, xmlStandalone: { get: function() { return false; }, set: none },
+      body: { set: function(v) { var old = _icall(this, 'body'), de = _icall(this, 'documentElement'); if (!de || v === old) return; if (old) _icall(de, 'replaceChild', v, old); else _icall(de, 'appendChild', v); } },
+      dir: { get: function() { var e = _icall(this, 'documentElement'); return (e && _iGetAttr.call(e, 'dir')) || ''; }, set: function(v) { var e = _icall(this, 'documentElement'); if (e) _iSetAttr.call(e, 'dir', String(v)); } },
+      designMode: { get: function() { return design; }, set: function(v) { v = String(v).toLowerCase(); if (v === 'on' || v === 'off') design = v; } },
+      fgColor: colour('text'), linkColor: colour('link'), vlinkColor: colour('vlink'), alinkColor: colour('alink'), bgColor: colour('bgcolor'),
+      fullscreenEnabled: { get: function() { return true; }, set: none }, fullscreen: { get: function() { return false; }, set: none },
+      fullscreenElement: { get: function() { return null; }, set: none },
+    };
+    var nf = function(v) { return function() { return v; }; };
+    var resolved = function(v) { return function() { return Promise.resolve(v); }; };
+    var FN = {
+      caretPositionFromPoint: nf(null), caretRangeFromPoint: nf(null), createNSResolver: function(n) { return n; },
+      createExpression: function(e, r) { var doc = this; return { evaluate: function(n, t, res) { return _icall(doc, 'evaluate', e, n, r, t, res); } }; },
+      exitFullscreen: resolved(undefined), exitPictureInPicture: resolved(undefined), hasStorageAccess: resolved(true),
+      hasUnpartitionedCookieAccess: resolved(true), requestStorageAccess: resolved(undefined), browsingTopics: resolved([]),
+      moveBefore: function(n, c) { return _icall(this, 'insertBefore', n, c); },
+      queryCommandEnabled: nf(false), queryCommandIndeterm: nf(false), queryCommandState: nf(false), queryCommandSupported: nf(false), queryCommandValue: nf(''),
+      hasPrivateToken: function() { return Promise.reject(new DOMException('Not supported.', 'NotSupportedError')); },
+      hasRedemptionRecord: function() { return Promise.reject(new DOMException('Not supported.', 'NotSupportedError')); },
+    };
+    var handler = function(k) {
+      return {
+        get: _markNativeAs(function() { var m = _handlerSlots.get(this); return (m && m[k]) || null; }, 'function get ' + k + '() { [native code] }'),
+        set: _markNativeAs(function(v) { var m = _handlerSlots.get(this); if (!m) { m = {}; _handlerSlots.set(this, m); } m[k] = typeof v === 'function' ? v : null; }, 'function set ' + k + '() { [native code] }'),
+        enumerable: true, configurable: true,
+      };
+    };
+    ORDER.forEach(function(m) {
+      var k = m[0], kind = m[1], d = saved[k];
+      if (Object.prototype.hasOwnProperty.call(P, k)) return;
+      if (kind === 'ctor') { Object.defineProperty(P, k, saved.constructor); return; }
+      if (/^on/.test(k) && kind === 'getset' && (!d || !d.get)) { Object.defineProperty(P, k, handler(k)); return; }
+      if (d) {
+        if (d.get) d.enumerable = true;
+        if (typeof d.value === 'function') { d.enumerable = true; if (d.value.length !== m[2]) Object.defineProperty(d.value, 'length', { value: m[2], configurable: true }); }
+        if (GET[k]) d = { get: GET[k], set: undefined, enumerable: true, configurable: true };
+        if (kind === 'getset' && d.get && !d.set && GETSET[k]) d.set = _markNativeAs(GETSET[k].set, 'function set ' + k + '() { [native code] }');
+        if (d.get) _markNativeAs(d.get, 'function get ' + k + '() { [native code] }');
+        Object.defineProperty(P, k, d);
+        return;
+      }
+      if (kind === 'fn') {
+        var impl = FN[k] || none;
+        var f = { [k]: function() { return impl.apply(this, arguments); } }[k];
+        Object.defineProperty(f, 'length', { value: m[2], configurable: true });
+        Object.defineProperty(P, k, { value: _markNativeAs(f, 'function ' + k + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+      } else {
+        var g = GET[k] || (GETSET[k] && GETSET[k].get) || nf(null), s = kind === 'getset' ? ((GETSET[k] && GETSET[k].set) || none) : undefined;
+        Object.defineProperty(P, k, {
+          get: _markNativeAs(function() { return g.call(this); }, 'function get ' + k + '() { [native code] }'),
+          set: s && _markNativeAs(function(v) { s.call(this, v); }, 'function set ' + k + '() { [native code] }'),
+          enumerable: true, configurable: true,
+        });
+      }
+    });
+    Object.keys(saved).forEach(function(k) {
+      if (Object.prototype.hasOwnProperty.call(P, k)) return;
+      if (k.charAt(0) === '_') Object.defineProperty(P, k, saved[k]);
+    });
+    if (saved.location) {
+      _markNativeAs(saved.location.get, 'function get location() { [native code] }');
+      if (saved.location.set) _markNativeAs(saved.location.set, 'function set location() { [native code] }');
+      _docLocation = { get: saved.location.get, set: saved.location.set, enumerable: true, configurable: false };
+    }
+  });
+  // window.cookieStore over the document's cookie jar (name/value only; the
+  // jar does not expose attributes). indexedDB is an IDBFactory. Device
+  // motion payload interfaces exist, as in desktop Chrome.
+  _lateShapes.push(function _cookieStoreShape() {
+    var C = iface('CookieStore', EventTarget.prototype);
+    var jar = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
+    var read = function() {
+      return String(jar.get.call(document) || '').split(/;\s*/).filter(Boolean).map(function(p) {
+        var i = p.indexOf('=');
+        return { name: i < 0 ? '' : p.slice(0, i), value: i < 0 ? p : p.slice(i + 1), domain: null, path: '/', expires: null, secure: true, sameSite: 'strict', partitioned: false };
+      });
+    };
+    var opts = function(a, b) { return a && typeof a === 'object' ? a : { name: a === undefined ? undefined : String(a), value: b }; };
+    var write = function(o, expires) {
+      var s = o.name + '=' + (o.value == null ? '' : o.value) + '; path=' + (o.path || '/');
+      if (o.domain) s += '; domain=' + o.domain;
+      if (expires != null) s += '; expires=' + new Date(expires).toUTCString();
+      s += '; samesite=' + (o.sameSite || 'strict') + '; secure';
+      jar.set.call(document, s);
+    };
+    var M = {
+      delete: [1, function(a) { var o = opts(a); write({ name: o.name, value: '', path: o.path, domain: o.domain }, 0); return Promise.resolve(); }],
+      get: [0, function(a) { var o = opts(a), all = read(); var hit = o.name === undefined ? all[0] : all.find(function(c) { return c.name === o.name; }); return Promise.resolve(hit || null); }],
+      getAll: [0, function(a) { var o = opts(a), all = read(); return Promise.resolve(o.name === undefined ? all : all.filter(function(c) { return c.name === o.name; })); }],
+      set: [1, function(a, b) { var o = opts(a, b); if (!o.name && !o.value) return Promise.reject(new TypeError("Failed to execute 'set' on 'CookieStore': Cookie name and value both cannot be empty.")); write(o, o.expires); return Promise.resolve(); }],
+    };
+    var ctor = Object.getOwnPropertyDescriptor(C.prototype, 'constructor');
+    delete C.prototype.constructor;
+    Object.keys(M).forEach(function(k) {
+      var impl = M[k][1], f = { [k]: function() { return impl.apply(this, arguments); } }[k];
+      Object.defineProperty(f, 'length', { value: M[k][0], configurable: true });
+      Object.defineProperty(C.prototype, k, { value: _markNativeAs(f, 'function ' + k + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+    });
+    Object.defineProperty(C.prototype, 'constructor', ctor);
+    _hoistMembers({ onchange: null }, C.prototype);
+    var store = Object.create(C.prototype);
+    Object.defineProperty(globalThis, 'cookieStore', {
+      get: _markNativeAs(function() { return store; }, 'function get cookieStore() { [native code] }'), set: undefined, enumerable: true, configurable: true,
+    });
+    adopt(globalThis.indexedDB, 'IDBFactory');
+    ['DeviceMotionEventAcceleration', 'DeviceMotionEventRotationRate'].forEach(function(n) {
+      var I = iface(n), keys = n === 'DeviceMotionEventAcceleration' ? ['x', 'y', 'z'] : ['alpha', 'beta', 'gamma'];
+      var c = Object.getOwnPropertyDescriptor(I.prototype, 'constructor');
+      delete I.prototype.constructor;
+      keys.forEach(function(k) { Object.defineProperty(I.prototype, k, { get: _markNativeAs(function() { return null; }, 'function get ' + k + '() { [native code] }'), set: undefined, enumerable: true, configurable: true }); });
+      Object.defineProperty(I.prototype, 'constructor', c);
+    });
+  });
   _lateShapes.push(function _conformToChrome() {
-    var SNAP = {"Scheduling":{"parent":null,"members":[["isInputPending","fn",0],["constructor","ctor"]]},"UserActivation":{"parent":null,"members":[["hasBeenActive","get"],["isActive","get"],["constructor","ctor"]]},"Geolocation":{"parent":null,"members":[["clearWatch","fn",1],["getCurrentPosition","fn",1],["watchPosition","fn",1],["constructor","ctor"]]},"WindowControlsOverlay":{"parent":"EventTarget","members":[["visible","get"],["ongeometrychange","getset"],["getTitlebarAreaRect","fn",0],["constructor","ctor"]]},"PluginArray":{"parent":null,"members":[["length","get"],["item","fn",1],["namedItem","fn",1],["refresh","fn",0],["constructor","ctor"]]},"MimeTypeArray":{"parent":null,"members":[["length","get"],["item","fn",1],["namedItem","fn",1],["constructor","ctor"]]},"NetworkInformation":{"parent":"EventTarget","members":[["onchange","getset"],["effectiveType","get"],["rtt","get"],["downlink","get"],["saveData","get"],["constructor","ctor"]]},"ProtectedAudience":{"parent":null,"members":[["queryFeatureSupport","fn",1],["constructor","ctor"]]},"Bluetooth":{"parent":"EventTarget","members":[["getAvailability","fn",0],["requestDevice","fn",0],["constructor","ctor"]]},"Clipboard":{"parent":"EventTarget","members":[["onclipboardchange","getset"],["read","fn",0],["readText","fn",0],["write","fn",1],["writeText","fn",1],["constructor","ctor"]]},"CredentialsContainer":{"parent":null,"members":[["create","fn",0],["get","fn",0],["preventSilentAccess","fn",0],["store","fn",1],["constructor","ctor"]]},"Keyboard":{"parent":null,"members":[["getLayoutMap","fn",0],["lock","fn",0],["unlock","fn",0],["constructor","ctor"]]},"NavigatorManagedData":{"parent":"EventTarget","members":[["onmanagedconfigurationchange","getset"],["getManagedConfiguration","fn",1],["constructor","ctor"]]},"MediaDevices":{"parent":"EventTarget","members":[["ondevicechange","getset"],["enumerateDevices","fn",0],["getSupportedConstraints","fn",0],["getUserMedia","fn",0],["getDisplayMedia","fn",0],["setCaptureHandleConfig","fn",0],["constructor","ctor"]]},"ServiceWorkerContainer":{"parent":"EventTarget","members":[["controller","get"],["ready","get"],["oncontrollerchange","getset"],["onmessage","getset"],["onmessageerror","getset"],["getRegistration","fn",0],["getRegistrations","fn",0],["register","fn",1],["startMessages","fn",0],["constructor","ctor"]]},"VirtualKeyboard":{"parent":"EventTarget","members":[["boundingRect","get"],["overlaysContent","getset"],["ongeometrychange","getset"],["hide","fn",0],["show","fn",0],["constructor","ctor"]]},"WakeLock":{"parent":null,"members":[["request","fn",0],["constructor","ctor"]]},"NavigatorUAData":{"parent":null,"members":[["brands","get"],["mobile","get"],["platform","get"],["getHighEntropyValues","fn",1],["toJSON","fn",0],["constructor","ctor"]]},"LockManager":{"parent":null,"members":[["query","fn",0],["request","fn",2],["constructor","ctor"]]},"StorageManager":{"parent":null,"members":[["estimate","fn",0],["persisted","fn",0],["constructor","ctor"],["getDirectory","fn",0],["persist","fn",0]]},"GPU":{"parent":null,"members":[["wgslLanguageFeatures","get"],["getPreferredCanvasFormat","fn",0],["requestAdapter","fn",0],["constructor","ctor"]]},"NavigatorLogin":{"parent":null,"members":[["setStatus","fn",1],["constructor","ctor"]]},"Ink":{"parent":null,"members":[["requestPresenter","fn",0],["constructor","ctor"]]},"MediaCapabilities":{"parent":null,"members":[["decodingInfo","fn",1],["encodingInfo","fn",1],["constructor","ctor"]]},"Permissions":{"parent":null,"members":[["query","fn",1],["constructor","ctor"]]},"DevicePosture":{"parent":"EventTarget","members":[["type","get"],["onchange","getset"],["constructor","ctor"]]},"HID":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getDevices","fn",0],["constructor","ctor"],["requestDevice","fn",1]]},"MediaSession":{"parent":null,"members":[["metadata","getset"],["playbackState","getset"],["setActionHandler","fn",2],["setCameraActive","fn",1],["setMicrophoneActive","fn",1],["setPositionState","fn",0],["constructor","ctor"]]},"Presentation":{"parent":null,"members":[["defaultRequest","getset"],["receiver","get"],["constructor","ctor"]]},"Serial":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getPorts","fn",0],["constructor","ctor"],["requestPort","fn",0]]},"USB":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getDevices","fn",0],["constructor","ctor"],["requestDevice","fn",1]]},"XRSystem":{"parent":"EventTarget","members":[["ondevicechange","getset"],["isSessionSupported","fn",1],["requestSession","fn",1],["constructor","ctor"]]},"StorageBucketManager":{"parent":null,"members":[["delete","fn",1],["keys","fn",0],["open","fn",1],["constructor","ctor"]]},"Plugin":{"parent":null,"members":[["name","get"],["filename","get"],["description","get"],["length","get"],["item","fn",1],["namedItem","fn",1],["constructor","ctor"]]},"MimeType":{"parent":null,"members":[["type","get"],["suffixes","get"],["description","get"],["enabledPlugin","get"],["constructor","ctor"]]},"Navigator":{"parent":null,"members":[["vendorSub","get"],["productSub","get"],["vendor","get"],["maxTouchPoints","get"],["scheduling","get"],["userActivation","get"],["geolocation","get"],["doNotTrack","get"],["webkitTemporaryStorage","get"],["webkitPersistentStorage","get"],["windowControlsOverlay","get"],["hardwareConcurrency","get"],["cookieEnabled","get"],["appCodeName","get"],["appName","get"],["appVersion","get"],["platform","get"],["product","get"],["userAgent","get"],["language","get"],["languages","get"],["onLine","get"],["webdriver","get"],["plugins","get"],["mimeTypes","get"],["pdfViewerEnabled","get"],["connection","get"],["getGamepads","fn",0],["javaEnabled","fn",0],["sendBeacon","fn",1],["vibrate","fn",1],["constructor","ctor"],["cpuPerformance","get"],["deprecatedRunAdAuctionEnforcesKAnonymity","get"],["protectedAudience","get"],["bluetooth","get"],["clipboard","get"],["credentials","get"],["keyboard","get"],["managed","get"],["mediaDevices","get"],["serviceWorker","get"],["virtualKeyboard","get"],["wakeLock","get"],["deviceMemory","get"],["userAgentData","get"],["locks","get"],["storage","get"],["gpu","get"],["login","get"],["ink","get"],["mediaCapabilities","get"],["permissions","get"],["devicePosture","get"],["hid","get"],["mediaSession","get"],["presentation","get"],["serial","get"],["usb","get"],["xr","get"],["storageBuckets","get"],["adAuctionComponents","fn",1],["runAdAuction","fn",1],["canLoadAdAuctionFencedFrame","fn",0],["canShare","fn",0],["share","fn",0],["clearAppBadge","fn",0],["getBattery","fn",0],["getUserMedia","fn",3],["requestMIDIAccess","fn",0],["requestMediaKeySystemAccess","fn",2],["setAppBadge","fn",0],["webkitGetUserMedia","fn",3],["clearOriginJoinedAdInterestGroups","fn",1],["createAuctionNonce","fn",0],["joinAdInterestGroup","fn",1],["leaveAdInterestGroup","fn",0],["updateAdInterestGroups","fn",0],["deprecatedReplaceInURN","fn",2],["deprecatedURNToURL","fn",1],["getInstalledRelatedApps","fn",0],["getInterestGroupAdAuctionData","fn",1],["registerProtocolHandler","fn",2],["unregisterProtocolHandler","fn",2]]}};
+    var SNAP = {"IDBFactory":{"parent":null,"members":[["cmp","fn",2],["databases","fn",0],["deleteDatabase","fn",1],["open","fn",1],["constructor","ctor"]]},"Scheduling":{"parent":null,"members":[["isInputPending","fn",0],["constructor","ctor"]]},"UserActivation":{"parent":null,"members":[["hasBeenActive","get"],["isActive","get"],["constructor","ctor"]]},"Geolocation":{"parent":null,"members":[["clearWatch","fn",1],["getCurrentPosition","fn",1],["watchPosition","fn",1],["constructor","ctor"]]},"WindowControlsOverlay":{"parent":"EventTarget","members":[["visible","get"],["ongeometrychange","getset"],["getTitlebarAreaRect","fn",0],["constructor","ctor"]]},"PluginArray":{"parent":null,"members":[["length","get"],["item","fn",1],["namedItem","fn",1],["refresh","fn",0],["constructor","ctor"]]},"MimeTypeArray":{"parent":null,"members":[["length","get"],["item","fn",1],["namedItem","fn",1],["constructor","ctor"]]},"NetworkInformation":{"parent":"EventTarget","members":[["onchange","getset"],["effectiveType","get"],["rtt","get"],["downlink","get"],["saveData","get"],["constructor","ctor"]]},"ProtectedAudience":{"parent":null,"members":[["queryFeatureSupport","fn",1],["constructor","ctor"]]},"Bluetooth":{"parent":"EventTarget","members":[["getAvailability","fn",0],["requestDevice","fn",0],["constructor","ctor"]]},"Clipboard":{"parent":"EventTarget","members":[["onclipboardchange","getset"],["read","fn",0],["readText","fn",0],["write","fn",1],["writeText","fn",1],["constructor","ctor"]]},"CredentialsContainer":{"parent":null,"members":[["create","fn",0],["get","fn",0],["preventSilentAccess","fn",0],["store","fn",1],["constructor","ctor"]]},"Keyboard":{"parent":null,"members":[["getLayoutMap","fn",0],["lock","fn",0],["unlock","fn",0],["constructor","ctor"]]},"NavigatorManagedData":{"parent":"EventTarget","members":[["onmanagedconfigurationchange","getset"],["getManagedConfiguration","fn",1],["constructor","ctor"]]},"MediaDevices":{"parent":"EventTarget","members":[["ondevicechange","getset"],["enumerateDevices","fn",0],["getSupportedConstraints","fn",0],["getUserMedia","fn",0],["getDisplayMedia","fn",0],["setCaptureHandleConfig","fn",0],["constructor","ctor"]]},"ServiceWorkerContainer":{"parent":"EventTarget","members":[["controller","get"],["ready","get"],["oncontrollerchange","getset"],["onmessage","getset"],["onmessageerror","getset"],["getRegistration","fn",0],["getRegistrations","fn",0],["register","fn",1],["startMessages","fn",0],["constructor","ctor"]]},"VirtualKeyboard":{"parent":"EventTarget","members":[["boundingRect","get"],["overlaysContent","getset"],["ongeometrychange","getset"],["hide","fn",0],["show","fn",0],["constructor","ctor"]]},"WakeLock":{"parent":null,"members":[["request","fn",0],["constructor","ctor"]]},"NavigatorUAData":{"parent":null,"members":[["brands","get"],["mobile","get"],["platform","get"],["getHighEntropyValues","fn",1],["toJSON","fn",0],["constructor","ctor"]]},"LockManager":{"parent":null,"members":[["query","fn",0],["request","fn",2],["constructor","ctor"]]},"StorageManager":{"parent":null,"members":[["estimate","fn",0],["persisted","fn",0],["constructor","ctor"],["getDirectory","fn",0],["persist","fn",0]]},"GPU":{"parent":null,"members":[["wgslLanguageFeatures","get"],["getPreferredCanvasFormat","fn",0],["requestAdapter","fn",0],["constructor","ctor"]]},"NavigatorLogin":{"parent":null,"members":[["setStatus","fn",1],["constructor","ctor"]]},"Ink":{"parent":null,"members":[["requestPresenter","fn",0],["constructor","ctor"]]},"MediaCapabilities":{"parent":null,"members":[["decodingInfo","fn",1],["encodingInfo","fn",1],["constructor","ctor"]]},"Permissions":{"parent":null,"members":[["query","fn",1],["constructor","ctor"]]},"DevicePosture":{"parent":"EventTarget","members":[["type","get"],["onchange","getset"],["constructor","ctor"]]},"HID":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getDevices","fn",0],["constructor","ctor"],["requestDevice","fn",1]]},"MediaSession":{"parent":null,"members":[["metadata","getset"],["playbackState","getset"],["setActionHandler","fn",2],["setCameraActive","fn",1],["setMicrophoneActive","fn",1],["setPositionState","fn",0],["constructor","ctor"]]},"Presentation":{"parent":null,"members":[["defaultRequest","getset"],["receiver","get"],["constructor","ctor"]]},"Serial":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getPorts","fn",0],["constructor","ctor"],["requestPort","fn",0]]},"USB":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getDevices","fn",0],["constructor","ctor"],["requestDevice","fn",1]]},"XRSystem":{"parent":"EventTarget","members":[["ondevicechange","getset"],["isSessionSupported","fn",1],["requestSession","fn",1],["constructor","ctor"]]},"StorageBucketManager":{"parent":null,"members":[["delete","fn",1],["keys","fn",0],["open","fn",1],["constructor","ctor"]]},"Plugin":{"parent":null,"members":[["name","get"],["filename","get"],["description","get"],["length","get"],["item","fn",1],["namedItem","fn",1],["constructor","ctor"]]},"MimeType":{"parent":null,"members":[["type","get"],["suffixes","get"],["description","get"],["enabledPlugin","get"],["constructor","ctor"]]},"Navigator":{"parent":null,"members":[["vendorSub","get"],["productSub","get"],["vendor","get"],["maxTouchPoints","get"],["scheduling","get"],["userActivation","get"],["geolocation","get"],["doNotTrack","get"],["webkitTemporaryStorage","get"],["webkitPersistentStorage","get"],["windowControlsOverlay","get"],["hardwareConcurrency","get"],["cookieEnabled","get"],["appCodeName","get"],["appName","get"],["appVersion","get"],["platform","get"],["product","get"],["userAgent","get"],["language","get"],["languages","get"],["onLine","get"],["webdriver","get"],["plugins","get"],["mimeTypes","get"],["pdfViewerEnabled","get"],["connection","get"],["getGamepads","fn",0],["javaEnabled","fn",0],["sendBeacon","fn",1],["vibrate","fn",1],["constructor","ctor"],["cpuPerformance","get"],["deprecatedRunAdAuctionEnforcesKAnonymity","get"],["protectedAudience","get"],["bluetooth","get"],["clipboard","get"],["credentials","get"],["keyboard","get"],["managed","get"],["mediaDevices","get"],["serviceWorker","get"],["virtualKeyboard","get"],["wakeLock","get"],["deviceMemory","get"],["userAgentData","get"],["locks","get"],["storage","get"],["gpu","get"],["login","get"],["ink","get"],["mediaCapabilities","get"],["permissions","get"],["devicePosture","get"],["hid","get"],["mediaSession","get"],["presentation","get"],["serial","get"],["usb","get"],["xr","get"],["storageBuckets","get"],["adAuctionComponents","fn",1],["runAdAuction","fn",1],["canLoadAdAuctionFencedFrame","fn",0],["canShare","fn",0],["share","fn",0],["clearAppBadge","fn",0],["getBattery","fn",0],["getUserMedia","fn",3],["requestMIDIAccess","fn",0],["requestMediaKeySystemAccess","fn",2],["setAppBadge","fn",0],["webkitGetUserMedia","fn",3],["clearOriginJoinedAdInterestGroups","fn",1],["createAuctionNonce","fn",0],["joinAdInterestGroup","fn",1],["leaveAdInterestGroup","fn",0],["updateAdInterestGroups","fn",0],["deprecatedReplaceInURN","fn",2],["deprecatedURNToURL","fn",1],["getInstalledRelatedApps","fn",0],["getInterestGroupAdAuctionData","fn",1],["registerProtocolHandler","fn",2],["unregisterProtocolHandler","fn",2]]}};
     Object.keys(SNAP).forEach(function(name) {
       var C = globalThis[name];
       if (typeof C !== 'function' || !C.prototype) return;
@@ -17596,6 +17773,7 @@ globalThis.__obscura_init = function() {
   }
   const documentNid = +_dom("document_node_id");
   globalThis.document = new Document(documentNid);
+  if (_docLocation) Object.defineProperty(globalThis.document, 'location', _docLocation);
   _offscreenDoc = globalThis.document;
   if (typeof HTMLDocument === 'function') Object.setPrototypeOf(globalThis.document, HTMLDocument.prototype);
   // parentNode on <html> reaches the backing document node. Keep that wrapper
@@ -17698,7 +17876,25 @@ globalThis.__obscura_init = function() {
 // _preHideInternals are already non-enumerable, so Object.keys would omit them
 // and leave them out of the hide list (and thus visible to the reflection-API
 // filter and to fingerprinting scripts). getOwnPropertyNames captures them.
+// Internal node fields live in a WeakMap behind non-enumerable accessors on
+// Node.prototype, so nodes carry no own properties (Chrome's have none):
+// Object.keys(el), for-in and Reflect.ownKeys see nothing obscura-specific.
+var _nodeSlots = new WeakMap();
+['__ariaQuerySelector','__ariaQuerySelectorAll','__blobStore','__currentScriptNid','__customUpgraded','__customUpgradeFailed','__fetchInterceptCallback','__fetchInterceptEnabled','__inlineHandlerCache','__intersectionObservers','__markParserScripts','__mutationObservers','__notifyMutation','__onload','__resizeObservers','__virtualUrl','_aborted','_active','_adoptedStyleNodes','_adoptedStyleSheets','_adopters','_animation','_ascentOverride','_attr','_attributes','_body','_bodyBytes','_bodyNull','_bodyStream','_bodyUsed','_buf','_byCtor','_bytes','_c','_callback','_chain','_classList','_clonable','_connected','_controller','_cssConnected','_cssFaces','_cssRules','_cssText','_ctx','_cues','_d','_damageQueued','_dataset','_decoder','_defining','_delegatesFocus','_descentOverride','_dialogCancelFiring','_dialogModal','_direction','_display','_doc','_doctype','_docType','_documentGeneration','_ec','_effectiveDomain','_el','_element','_eo','_error','_eventRegistry','_faces','_fallback','_family','_featureSettings','_files','_finishTimer','_flags','_fonts','_formChecked','_formIndeterminate','_formValues','_fragmentContext','_frameId','_gl','_glV2','_head','_holdTime','_host','_href','_htmlForList','_iframeDoc','_iframeEl','_iframeLoadedUrl','_iframeLoadingUrl','_iframeWin','_imageComplete','_imageCompletionDeferred','_imageCurrentSrc','_imageDecoded','_imageDecodeWaiters','_imageInitialized','_imageNaturalHeight','_imageNaturalWidth','_imageOnerror','_imageOnload','_imageQueued','_imageRequest','_immediatePropagationStopped','_internalsAttached','_keyframes','_lineGapOverride','_listeners','_lname','_loaded','_loadedPromise','_margins','_message','_mode','_name','_nativeId','_nid','_ns','_nsCache','_nullNamespaceAttrs','_offscreen','_oncancel','_onchange','_onclose','_ontypechange','_options','_originClean','_ownerDocument','_ownerNode','_p','_parentRule','_parentStyleSheet','_parsedSrc','_path','_playState','_popoverState','_previous','_propagationStopped','_publicId','_queue','_range','_read','_reads','_readyPromise','_reason','_records','_registered','_registeredAdoptedStyleSheets','_registry','_rejectFinished','_rejectLoaded','_relList','_resolveFinished','_resolveLoaded','_returnValue','_root','_rules','_sandboxList','_sc','_scrollEventPending','_scrollLeft','_scrollRestoration','_scrollSuppress','_scrollTop','_selected','_selection','_selectorText','_serializable','_sets','_sheet','_sink','_sizesList','_skipped','_slotAssignment','_so','_source','_sourceNode','_sourceText','_sp','_startTime','_state','_states','_stateStack','_status','_stretch','_style','_styleSheetList','_svgClassName','_svgHref','_systemId','_t','_tagName','_target','_targets','_templateContent','_textTrack','_thresholds','_timeline','_timing','_title','_treeConnected','_treeConnectedEpoch','_treeDetachedExact','_treeParent','_treeParentEpoch','_type','_unicodeRange','_url','_valid','_value','_variant','_variationSettings','_w','_weight','_whenDefinedResolvers','_wrap','_writeAnchorNid','_writeAnchorScript'].forEach(function(k) {
+  if (Object.prototype.hasOwnProperty.call(Node.prototype, k)) return;
+  Object.defineProperty(Node.prototype, k, {
+    get: function() { var s = _nodeSlots.get(this); return s ? s[k] : undefined; },
+    set: function(v) { var s = _nodeSlots.get(this); if (!s) { s = {}; _nodeSlots.set(this, s); } s[k] = v; },
+    enumerable: false, configurable: true,
+  });
+});
 _lateShapes.forEach(function(f) { f(); });
+// Interface constructor lengths as Chrome 154 reports them.
+(function(L) { Object.keys(L).forEach(function(k) { var C = globalThis[k]; if (typeof C === 'function') Object.defineProperty(C, 'length', { value: L[k], configurable: true }); }); })({"Node":0,"Element":0,"DocumentFragment":0,"DocumentType":0,"KeyframeEffect":1,"ProcessingInstruction":0,"CSSStyleDeclaration":0,"DOMStringMap":0,"DOMTokenList":0,"NamedNodeMap":0,"Screen":0,"MessagePort":0,"Scheduler":0,"HTMLImageElement":0,"TextTrack":0,"TextTrackCue":0,"VTTCue":3,"Notification":1,"ScreenOrientation":0,"URL":1,"Response":0,"ResizeObserverSize":0,"ResizeObserverEntry":0,"TextDecoder":0,"CSSRule":0,"CSSStyleRule":0,"CSSRuleList":0,"CSSStyleSheet":0,"StyleSheetList":0,"ShadowRoot":0,"ElementInternals":0,"IntersectionObserver":1,"AbortSignal":0,"Blob":0,"File":2,"FormData":0,"History":0,"Selection":0,"AudioParam":0,"AudioNode":0,"AudioScheduledSourceNode":0,"ScriptProcessorNode":0,"AudioDestinationNode":0,"AudioListener":0,"BaseAudioContext":0,"AudioContext":0,"OfflineAudioContext":1,"SpeechSynthesisUtterance":0,"RTCSessionDescription":0,"RTCIceCandidate":0,"TouchList":0,"Touch":1,"Worker":1,"Image":0,"Audio":0,"EventSource":1,"WebSocket":1,"MediaQueryList":0,"ImageData":2,"TreeWalker":0,"SharedWorker":1,"URLPattern":0,"Attr":0});
+Object.getOwnPropertyNames(globalThis).forEach(function(k) {
+  var d = Object.getOwnPropertyDescriptor(globalThis, k), C = d && d.value;
+  if (typeof C === 'function' && C !== Object && C !== Function && C.prototype && typeof C.prototype === 'object') _protoHidden.add(C.prototype);
+});
 _lateShapes.length = 0;
 _iSetTimeout = globalThis.setTimeout;
 _iQueueMicrotask = globalThis.queueMicrotask;

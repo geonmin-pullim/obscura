@@ -135,6 +135,7 @@ pub async fn handle(
                 .unwrap_or(false);
 
             validate_context(params, "contextId", ctx, session_id, "evaluate")?;
+            grant_user_gesture(params, ctx, session_id);
 
             let await_promise = params
                 .get("awaitPromise")
@@ -202,6 +203,7 @@ pub async fn handle(
             // `objectId` is supplied — in that case context validation is a
             // no-op and the default context is used.
             validate_context(params, "executionContextId", ctx, session_id, "callFunctionOn")?;
+            grant_user_gesture(params, ctx, session_id);
 
             // Keep awaitPromise alive for the same command budget as evaluate.
             // Playwright implements waits with callFunctionOn on some utility
@@ -455,6 +457,17 @@ pub async fn handle(
 /// context Obscura has not advertised for the attached page. An absent identity
 /// uses the page's default context. Direct embedders retain the compatibility
 /// path for ids reserved through `next_isolated_context`.
+// `userGesture: true` runs the script as if the user had just interacted
+// (Chrome grants the page user activation), as Puppeteer requests on every
+// evaluate.
+fn grant_user_gesture(params: &Value, ctx: &mut CdpContext, session_id: &Option<String>) {
+    if params.get("userGesture").and_then(|v| v.as_bool()) == Some(true) {
+        if let Some(page) = ctx.get_session_page_mut(session_id) {
+            page.evaluate("globalThis.__obscura_userGesture && globalThis.__obscura_userGesture()");
+        }
+    }
+}
+
 fn validate_context(
     params: &Value,
     field: &str,
