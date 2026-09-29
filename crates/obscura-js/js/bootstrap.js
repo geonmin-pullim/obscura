@@ -38,7 +38,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
     '__obscura_perfMark', '__obscura_nav', '__obscura_perfResource', '_perfRecordResource', '_perfNowInternal', '_fetchInitiator', '_fetchInternal', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
-    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_ctx2dImpl', '_ctx2dProto', '_ctx2dPub', '_ctx2dPublic', '_CSS_COLORS', '_lateShapes', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
+    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_ctx2dImpl', '_ctx2dProto', '_ctx2dPub', '_ctx2dPublic', '_CSS_COLORS', '_lateShapes', '_iSetTimeout', '_iQueueMicrotask', '_iStructuredClone', '_iGetAttr', '_iSetAttr', '_iDocQS', '_iCreateElement', '_iGetContext', '_audioRate', '_nativeMethods', '_icall', '_snapshotNativeMethods', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -1758,7 +1758,7 @@ class CSSStyleDeclaration {
   // repeated style reads do not cross the JS/Rust op boundary.
   _pull() {
     if (this._loaded) return;
-    _parseCssInto(this._props, this._owner.getAttribute("style"));
+    _parseCssInto(this._props, _icall(this._owner, "getAttribute", "style"));
     this._loaded = true;
   }
   _replaceFromAttribute(text) {
@@ -3066,7 +3066,7 @@ globalThis.__obscura_activateLabel = function(label, control, trusted) {
 globalThis.__obscura_isDisabled = function(el) { return _isActuallyDisabled(el); };
 globalThis.__obscura_labeledControl = function(label) { return _labeledControl(label); };
 globalThis.__obscura_interactiveHost = function(el) {
-  return el && el.closest ? el.closest(_INTERACTIVE) : null;
+  return el && el.closest ? _icall(el, "closest", _INTERACTIVE) : null;
 };
 // Frozen so page script can neither replace the helpers to suppress or fake
 // label activation, nor delete them and make later clicks throw.
@@ -3125,11 +3125,11 @@ function _parseHTMLFragment(html, context) {
   const tag = context && context.nodeType === 1 ? context.localName : 'body';
   const tmp = ns && ns !== 'http://www.w3.org/1999/xhtml'
     ? document.createElementNS(ns, tag)
-    : document.createElement(tag);
+    : _icall(document, "createElement", tag);
   tmp.innerHTML = html;
   const out = [];
   let child;
-  while ((child = tmp.firstChild)) out.push(tmp.removeChild(child));
+  while ((child = tmp.firstChild)) out.push(_icall(tmp, "removeChild", child));
   return out;
 }
 
@@ -3705,10 +3705,13 @@ class Element extends Node {
     n = _htmlAttrName(this, n);
     const popoverPrev = (n === "popover") ? this.popover : undefined;
     const previousWindowName = (n === "id" || n === "name")
-      ? this.getAttribute(n)
+      ? (_iGetAttr || this.getAttribute).call(this, n)
       : null;
     const value = String(v);
     _dom("set_attribute", this._nid, n + "\0" + value);
+    // A canvas resets its bitmap when width/height change (was an
+    // HTMLCanvasElement.prototype.setAttribute override Chrome does not have).
+    if (this._ctx && this.localName === "canvas" && (n === "width" || n === "height")) this._ctx._resizeFromCanvas();
     if (n === "src" && this.localName === "iframe") {
       if (value && value !== "about:blank") this._loadIframeSrc(value);
       else this._resetIframeFrame();
@@ -3759,9 +3762,10 @@ class Element extends Node {
     n = _htmlAttrName(this, n);
     const popoverPrev = (n === "popover") ? this.popover : undefined;
     const previousWindowName = (n === "id" || n === "name")
-      ? this.getAttribute(n)
+      ? (_iGetAttr || this.getAttribute).call(this, n)
       : null;
     _dom("remove_attribute", this._nid, n);
+    if (this._ctx && this.localName === "canvas" && (n === "width" || n === "height")) this._ctx._resizeFromCanvas();
     if (this._nullNamespaceAttrs instanceof Map) {
       this._nullNamespaceAttrs.delete(n);
     }
@@ -3855,7 +3859,7 @@ class Element extends Node {
         break;
       }
       case 'beforeend':
-        for (const n of _parseHTMLFragment(html, context)) this.appendChild(n);
+        for (const n of _parseHTMLFragment(html, context)) _icall(this, "appendChild", n);
         break;
       case 'afterend':
         if (parent) { const next = this.nextSibling; for (const n of _parseHTMLFragment(html, context)) parent.insertBefore(n, next); }
@@ -3914,7 +3918,7 @@ class Element extends Node {
     // as a function body on first read and cache it on the instance.
     const cache = this.__inlineHandlerCache || (this.__inlineHandlerCache = {});
     if (Object.prototype.hasOwnProperty.call(cache, name)) return cache[name];
-    const src = this.getAttribute && this.getAttribute(name);
+    const src = (_iGetAttr || this.getAttribute).call(this, name);
     if (!src) { cache[name] = null; return null; }
     try {
       cache[name] = new Function('event', src);
@@ -4032,8 +4036,8 @@ class Element extends Node {
     }
     globalThis.__obscura_focused = this;
     globalThis.__obscura_click_target = this;
-    this.dispatchEvent(globalThis.__obscura_markTrusted(new FocusEvent('focus', { relatedTarget: previous })));
-    this.dispatchEvent(globalThis.__obscura_markTrusted(new FocusEvent('focusin', { bubbles: true, composed: true, relatedTarget: previous })));
+    _icall(this, "dispatchEvent", globalThis.__obscura_markTrusted(new FocusEvent('focus', { relatedTarget: previous })));
+    _icall(this, "dispatchEvent", globalThis.__obscura_markTrusted(new FocusEvent('focusin', { bubbles: true, composed: true, relatedTarget: previous })));
   }
   blur() {
     if (globalThis.__obscura_focused !== this) return;
@@ -4212,7 +4216,7 @@ class Element extends Node {
       return attr !== null ? attr : this.textContent;
     }
     if (tag === 'input') {
-      const itype = (this.getAttribute('type') || '').toLowerCase();
+      const itype = (_icall(this, 'getAttribute', 'type') || '').toLowerCase();
       if (itype === 'checkbox' || itype === 'radio') {
         // A checkbox/radio with no value attribute defaults to "on" in a real
         // browser, not the empty string.
@@ -4224,7 +4228,7 @@ class Element extends Node {
         return (this._files && this._files.length) ? ('C:\\fakepath\\' + this._files[0].name) : '';
       }
     }
-    return this.getAttribute("value") || "";
+    return _icall(this, "getAttribute", "value") || "";
   }
   // FileList for <input type=file>, populated by DOM.setFileInputFiles (Puppeteer
   // uploadFile / Playwright setInputFiles). null for non-file inputs, matching
@@ -4401,7 +4405,7 @@ class Element extends Node {
     // array, so value comparisons against strings never matched.
     if (this.localName === "select") return this.hasAttribute("multiple") ? "select-multiple" : "select-one";
     if (this.localName === "textarea") return "textarea";
-    return this.getAttribute("type") || (this.localName === "input" ? "text" : "");
+    return _icall(this, "getAttribute", "type") || (this.localName === "input" ? "text" : "");
   }
   set type(v) { this.setAttribute("type", v); }
   get name() { return this.getAttribute("name") || ""; }
@@ -5265,9 +5269,9 @@ class Element extends Node {
     if (this._scrollEventPending) return;
     this._scrollEventPending = true;
     const self = this;
-    setTimeout(() => {
+    (_iSetTimeout || setTimeout)(() => {
       self._scrollEventPending = false;
-      try { self.dispatchEvent(new Event('scroll', { bubbles: false })); } catch (e) {}
+      try { _eventTargetDispatch(self, new Event('scroll', { bubbles: false })); } catch (e) {}
     }, 0);
   }
   animate(keyframes, options) {
@@ -5534,7 +5538,7 @@ class Document extends Node {
   get firstElementChild() { return this.documentElement; }
   get lastElementChild() { return this.documentElement; }
   get head() { return this.querySelector("head"); }
-  get body() { return this.querySelector("body"); }
+  get body() { return (_iDocQS || this.querySelector).call(this, "body"); }
   get doctype() {
     if (this._doctype !== undefined) return this._doctype;
     const info = _domParse("document_doctype");
@@ -12650,10 +12654,10 @@ function _windowNameEligibleElement(element) {
 function _windowNamedSupportedNames(element) {
   const names = [];
   if (!element || element.nodeType !== 1) return names;
-  const id = element.getAttribute("id");
+  const id = _icall(element, "getAttribute", "id");
   if (id) names.push(id);
   if (_windowNameEligibleElement(element)) {
-    const name = element.getAttribute("name");
+    const name = _icall(element, "getAttribute", "name");
     if (name && name !== id) names.push(name);
   }
   return names;
@@ -13087,11 +13091,11 @@ class _IframeDocument {
     this.visibilityState = 'visible';
     this.hidden = false;
 
-    this._root = document.createElement('html');
-    this._head = document.createElement('head');
-    this._body = document.createElement('body');
-    this._root.appendChild(this._head);
-    this._root.appendChild(this._body);
+    this._root = _icall(document, 'createElement', 'html');
+    this._head = _icall(document, 'createElement', 'head');
+    this._body = _icall(document, 'createElement', 'body');
+    _icall(this._root, 'appendChild', this._head);
+    _icall(this._root, 'appendChild', this._body);
     var bodyContent = html
       .replace(/^<!DOCTYPE[^>]*>/i, '')
       .replace(/<\/?html[^>]*>/gi, '')
@@ -13104,7 +13108,7 @@ class _IframeDocument {
 
     this._title = '';
     if (this._head) {
-      const titleEl = this._head.querySelector('title');
+      const titleEl = _icall(this._head, 'querySelector', 'title');
       if (titleEl) this._title = titleEl.textContent;
     }
   }
@@ -13610,7 +13614,7 @@ class _Canvas2D {
     this._resizeFromCanvas();
   }
   _canvasDimension(name, fallback) {
-    const raw = this.canvas.getAttribute(name);
+    const raw = (_iGetAttr || this.canvas.getAttribute).call(this.canvas, name);
     if (raw === null || raw === '') return fallback;
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
@@ -13655,7 +13659,7 @@ class _Canvas2D {
   _markPaintDamage() {
     if (this._damageQueued || this.canvas._offscreen) return;
     this._damageQueued = true;
-    queueMicrotask(() => {
+    (_iQueueMicrotask || queueMicrotask)(() => {
       this._damageQueued = false;
       const damage = __obscuraCore.ops.op_canvas_paint_damage;
       if (typeof damage === 'function') damage(this.canvas._nid);
@@ -13860,31 +13864,17 @@ class _Canvas2D {
 
 class HTMLCanvasElement extends Element {
   get width() {
-    const raw = this.getAttribute('width');
+    const raw = (_iGetAttr || this.getAttribute).call(this, 'width');
     const parsed = raw === null ? 300 : Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 300;
   }
-  set width(value) { this.setAttribute('width', Math.max(0, Number(value) || 0)); }
+  set width(value) { (_iSetAttr || this.setAttribute).call(this, 'width', Math.max(0, Number(value) || 0)); }
   get height() {
-    const raw = this.getAttribute('height');
+    const raw = (_iGetAttr || this.getAttribute).call(this, 'height');
     const parsed = raw === null ? 150 : Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 150;
   }
-  set height(value) { this.setAttribute('height', Math.max(0, Number(value) || 0)); }
-  setAttribute(name, value) {
-    super.setAttribute(name, value);
-    const normalized = String(name).toLowerCase();
-    if (this._ctx && (normalized === 'width' || normalized === 'height')) {
-      this._ctx._resizeFromCanvas();
-    }
-  }
-  removeAttribute(name) {
-    super.removeAttribute(name);
-    const normalized = String(name).toLowerCase();
-    if (this._ctx && (normalized === 'width' || normalized === 'height')) {
-      this._ctx._resizeFromCanvas();
-    }
-  }
+  set height(value) { (_iSetAttr || this.setAttribute).call(this, 'height', Math.max(0, Number(value) || 0)); }
 }
 globalThis.HTMLCanvasElement = HTMLCanvasElement;
 
@@ -14087,7 +14077,7 @@ if (typeof Document !== 'undefined' && typeof Document.parseHTMLUnsafe !== 'func
   }
   class OscillatorNode extends AudioScheduledSourceNode {
     #type = 'sine'; #frequency; #detune;
-    constructor(ctx, o = {}) { super(ctx); const ny = ctx.sampleRate / 2; this.#frequency = param(o.frequency ?? 440, -ny, ny); this.#detune = param(o.detune ?? 0, -153600, 153600); if (o.type) this.#type = o.type; }
+    constructor(ctx, o = {}) { super(ctx); const ny = (_audioRate.get(ctx) || 44100) / 2; this.#frequency = param(o.frequency ?? 440, -ny, ny); this.#detune = param(o.detune ?? 0, -153600, 153600); if (o.type) this.#type = o.type; }
     get type() { return this.#type; }
     set type(v) { this.#type = String(v); }
     get frequency() { return this.#frequency; }
@@ -14128,7 +14118,7 @@ if (typeof Document !== 'undefined' && typeof Document.parseHTMLUnsafe !== 'func
   }
   class BiquadFilterNode extends AudioNode {
     #type = 'lowpass'; #p;
-    constructor(ctx) { super(ctx); const ny = ctx.sampleRate / 2; this.#p = { frequency: param(350, 0, ny), detune: param(0, -153600, 153600), Q: param(1), gain: param(0, -MAXF, 1541.273681640625) }; }
+    constructor(ctx) { super(ctx); const ny = (_audioRate.get(ctx) || 44100) / 2; this.#p = { frequency: param(350, 0, ny), detune: param(0, -153600, 153600), Q: param(1), gain: param(0, -MAXF, 1541.273681640625) }; }
     get type() { return this.#type; }
     set type(v) { this.#type = String(v); }
     get frequency() { return this.#p.frequency; }
@@ -14176,6 +14166,7 @@ if (typeof Document !== 'undefined' && typeof Document.parseHTMLUnsafe !== 'func
       if (key !== KEY) throw new TypeError('Illegal constructor');
       super();
       this.#rate = rate; this.#state = state;
+      _audioRate.set(this, rate);
       this.#dest = new AudioDestinationNode(this);
       this.#listener = new AudioListener(KEY);
     }
@@ -14235,7 +14226,7 @@ if (typeof Document !== 'undefined' && typeof Document.parseHTMLUnsafe !== 'func
     startRendering() {
       const self = this, len = this.#len;
       setState(this, 'running');
-      const buf = new AudioBuffer({ numberOfChannels: 1, length: len, sampleRate: this.sampleRate });
+      const buf = new AudioBuffer({ numberOfChannels: 1, length: len, sampleRate: _audioRate.get(this) });
       const data = buf.getChannelData(0);
       // Simulate compressed triangle wave at 10kHz.
       // Target: sum(|data[4500..5000]|) matches Chrome (~124.04347527516074).
@@ -14254,7 +14245,7 @@ if (typeof Document !== 'undefined' && typeof Document.parseHTMLUnsafe !== 'func
         const evt = new Event('complete');
         Object.defineProperty(evt, 'renderedBuffer', { value: buf });
         if (self.#oncomplete) { try { self.#oncomplete.call(self, evt); } catch (e) {} }
-        try { self.dispatchEvent(evt); } catch (e) {}
+        try { _eventTargetDispatch(self, evt); } catch (e) {}
         return buf;
       });
     }
@@ -14284,7 +14275,8 @@ var _VOICES = [
   ['Google 普通话（中国大陆）', 'zh-CN'], ['Google 粤語（香港）', 'zh-HK'], ['Google 國語（臺灣）', 'zh-TW'],
 ];
 function _voiceList() {
-  var lang = String((globalThis.navigator && navigator.language) || 'en-US').slice(0, 2);
+  var langs = globalThis.__obscura_languages;
+  var lang = String((langs && langs[0]) || 'en-US').slice(0, 2);
   return (_SYSTEM_VOICES[lang] || _SYSTEM_VOICES.en).concat(_VOICES)
     .map(function(v) { return { voiceURI: v[0], name: v[0], lang: v[1], localService: !!v[3], default: !!v[2] }; });
 }
@@ -14300,13 +14292,13 @@ globalThis.speechSynthesis = {
     if (_voicesState === 0) {
       _voicesState = 1;
       var synth = this;
-      setTimeout(function() {
+      (_iSetTimeout || setTimeout)(function() {
         _voicesState = 2;
         _voiceObjects = _voiceMaker(_voiceList());
         var ev = new Event('voiceschanged');
         var h = synth.onvoiceschanged;
         if (typeof h === 'function') { try { h.call(synth, ev); } catch (e) { console.error(e); } }
-        synth.dispatchEvent(ev);
+        _eventTargetDispatch(synth, ev);
       }, 20 + Math.floor(Math.random() * 40));
     }
     return [];
@@ -14622,16 +14614,16 @@ function _workerHandlers(C, names) {
 function _workerFire(target, type, ev) {
   const h = _workerSlots.get(target)?.handlers['on' + type];
   if (h) { try { h.call(target, ev); } catch (e) { console.error(e); } }
-  target.dispatchEvent(ev);
+  _eventTargetDispatch(target, ev);
 }
 function _workerToParent(target, slot) {
   return {
     message(data) {
-      const value = structuredClone(data);
-      setTimeout(() => { if (!slot.terminated) _workerFire(target, 'message', new MessageEvent('message', { data: value })); }, 0);
+      const value = (_iStructuredClone || structuredClone)(data);
+      (_iSetTimeout || setTimeout)(() => { if (!slot.terminated) _workerFire(target, 'message', new MessageEvent('message', { data: value })); }, 0);
     },
     error(message, filename, lineno, colno) {
-      setTimeout(() => { if (!slot.terminated) _workerFire(target, 'error', new ErrorEvent('error', { message, filename, lineno, colno, cancelable: true })); }, 0);
+      (_iSetTimeout || setTimeout)(() => { if (!slot.terminated) _workerFire(target, 'error', new ErrorEvent('error', { message, filename, lineno, colno, cancelable: true })); }, 0);
     },
     close() { slot.terminated = true; },
   };
@@ -15754,7 +15746,7 @@ if (typeof OffscreenCanvas === 'undefined') {
     constructor(width, height) {
       if (arguments.length < 2) throw new TypeError("Failed to construct 'OffscreenCanvas': 2 arguments required, but only " + arguments.length + " present.");
       super();
-      this.#el = (_offscreenDoc || globalThis.document).createElement('canvas');
+      this.#el = (_iCreateElement || Document.prototype.createElement).call(_offscreenDoc || globalThis.document, 'canvas');
       // A worker realm has no HTMLCanvasElement global for createElement to
       // pick the element class from.
       if (!(this.#el instanceof HTMLCanvasElement)) Object.setPrototypeOf(this.#el, HTMLCanvasElement.prototype);
@@ -15768,7 +15760,7 @@ if (typeof OffscreenCanvas === 'undefined') {
     set height(v) { this.#el.height = v >>> 0; }
     getContext(type, options) {
       if (arguments.length < 1) throw new TypeError("Failed to execute 'getContext' on 'OffscreenCanvas': 1 argument required, but only 0 present.");
-      const ctx = this.#el.getContext(String(type), options);
+      const ctx = (_iGetContext || HTMLCanvasElement.prototype.getContext).call(this.#el, String(type), options);
       if (ctx && String(type) === '2d' && Object.getPrototypeOf(ctx) !== OffscreenCanvasRenderingContext2D.prototype)
         Object.setPrototypeOf(ctx, OffscreenCanvasRenderingContext2D.prototype);
       return ctx || null;
@@ -16254,7 +16246,7 @@ if (typeof Document !== 'undefined' && !Document.prototype.elementFromPoint) {
       // documentElement / body span the viewport; skip them so we pick a
       // real descendant instead of falling back to <html>/<body>.
       if (el === this.documentElement || el === this.body) continue;
-      var r = el.getBoundingClientRect();
+      var r = _icall(el, "getBoundingClientRect");
       if (r.width === 0 || r.height === 0) continue;
       // The renderer resolves this inherited property and carries it with the
       // existing geometry read, avoiding another native call per candidate.
@@ -16328,6 +16320,46 @@ var _perfTimeline = null;
 var _perfRecordResource = null;
 // Interface-shape passes that must see every shim; run at the end of bootstrap.
 var _lateShapes = [];
+// Originals of page-visible APIs, captured when bootstrap ends and before any
+// page script, for obscura's own code: a page that wraps these must not see
+// internal calls (Chrome makes none). Null during bootstrap itself.
+var _iSetTimeout = null, _iQueueMicrotask = null, _iStructuredClone = null;
+var _iGetAttr = null, _iSetAttr = null, _iDocQS = null, _iCreateElement = null, _iGetContext = null;
+// Sample rate per audio context, read without the page-visible getter.
+var _audioRate = new WeakMap();
+// _icall(obj, name, ...args): call the method `name` as it was when bootstrap
+// ended, looked up along obj's prototype chain, so internal code never goes
+// through a wrapper page script installed later. Falls back to obj[name].
+var _nativeMethods = new WeakMap();
+function _icall(obj, name) {
+  var args = Array.prototype.slice.call(arguments, 2);
+  for (var p = Object.getPrototypeOf(obj); p; p = Object.getPrototypeOf(p)) {
+    var m = _nativeMethods.get(p);
+    if (m && m.has(name)) return m.get(name).apply(obj, args);
+  }
+  return obj[name].apply(obj, args);
+}
+function _snapshotNativeMethods() {
+  var seen = new Set();
+  var take = function(P) {
+    for (; P && P !== Object.prototype && !seen.has(P); P = Object.getPrototypeOf(P)) {
+      seen.add(P);
+      var m = new Map();
+      Object.getOwnPropertyNames(P).forEach(function(k) {
+        var d = Object.getOwnPropertyDescriptor(P, k);
+        if (d && typeof d.value === 'function' && k !== 'constructor') m.set(k, d.value);
+        else if (d && d.get) m.set(k, function() { return d.get.call(this); });
+      });
+      _nativeMethods.set(P, m);
+    }
+  };
+  Object.getOwnPropertyNames(globalThis).forEach(function(k) {
+    var d = Object.getOwnPropertyDescriptor(globalThis, k);
+    var C = d && d.value;
+    if (typeof C === 'function' && C.prototype && typeof C.prototype === 'object') take(C.prototype);
+  });
+  take(Object.getPrototypeOf(globalThis));
+}
 // initiatorType for the next internal fetch (XMLHttpRequest goes through fetch).
 var _fetchInitiator = null;
 (function _interfaceFidelity() {
@@ -17294,8 +17326,8 @@ globalThis.__obscura_hoverTo = function(target, x, y, buttons, altKey, ctrlKey, 
   var sy = y + (globalThis.screenY || 0) + Math.max(0, (globalThis.outerHeight || 0) - (globalThis.innerHeight || 0));
   function ancestry(node) { var path = []; while (node) { path.push(node); node = node.parentNode || null; } return path; }
   function init(bubbles, related) { return { bubbles: bubbles, cancelable: bubbles, composed: bubbles, view: globalThis, clientX: x, clientY: y, screenX: sx, screenY: sy, button: 0, buttons: buttons, detail: 0, relatedTarget: related, altKey: altKey, ctrlKey: ctrlKey, metaKey: metaKey, shiftKey: shiftKey }; }
-  function pointerEvent(node, type, bubbles, related) { node.dispatchEvent(globalThis.__obscura_markTrusted(new PointerEvent(type, Object.assign(init(bubbles, related), { button: -1, pointerId: 1, pointerType: 'mouse', isPrimary: true, pressure: buttons ? 0.5 : 0 })))); }
-  function mouseEvent(node, type, bubbles, related) { node.dispatchEvent(globalThis.__obscura_markTrusted(new MouseEvent(type, init(bubbles, related)))); }
+  function pointerEvent(node, type, bubbles, related) { _icall(node, "dispatchEvent", globalThis.__obscura_markTrusted(new PointerEvent(type, Object.assign(init(bubbles, related), { button: -1, pointerId: 1, pointerType: 'mouse', isPrimary: true, pressure: buttons ? 0.5 : 0 })))); }
+  function mouseEvent(node, type, bubbles, related) { _icall(node, "dispatchEvent", globalThis.__obscura_markTrusted(new MouseEvent(type, init(bubbles, related)))); }
   var oldPath = previousTarget && previousTarget.isConnected ? ancestry(previousTarget) : [];
   var newPath = ancestry(target);
   var common = newPath.find(function(node) { return oldPath.includes(node); }) || null;
@@ -17514,7 +17546,7 @@ globalThis.__obscura_workerInit = function(kind, url, name, toParent) {
     if (closed) return;
     const h = handlers['on' + type];
     if (h) { try { h.call(globalThis, ev); } catch (e) { console.error(e); } }
-    globalThis.dispatchEvent(ev);
+    _eventTargetDispatch(globalThis, ev);
   };
   if (shared) {
     handlerAttr(globalThis, 'onconnect');
@@ -17680,6 +17712,15 @@ globalThis.__obscura_init = function() {
 // filter and to fingerprinting scripts). getOwnPropertyNames captures them.
 _lateShapes.forEach(function(f) { f(); });
 _lateShapes.length = 0;
+_iSetTimeout = globalThis.setTimeout;
+_iQueueMicrotask = globalThis.queueMicrotask;
+_iStructuredClone = globalThis.structuredClone;
+_iGetAttr = Element.prototype.getAttribute;
+_iSetAttr = Element.prototype.setAttribute;
+_iDocQS = Document.prototype.querySelector;
+_iCreateElement = Document.prototype.createElement;
+_iGetContext = HTMLCanvasElement.prototype.getContext;
+_snapshotNativeMethods();
 
 globalThis.__obscura_hide_list = Object.getOwnPropertyNames(globalThis).filter(k =>
   k.startsWith('_') || k.includes('obscura') || k.includes('Obscura')
