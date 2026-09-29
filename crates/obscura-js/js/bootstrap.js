@@ -38,7 +38,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
     '__obscura_perfMark', '__obscura_nav', '__obscura_perfResource', '_perfRecordResource', '_perfNowInternal', '_fetchInitiator', '_fetchInternal', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
-    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
+    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_lateShapes', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -6996,75 +6996,72 @@ for (let i = 0; i < 50; i++) {
 function Navigator() {}
 _markNative(Navigator);
 
-// PluginArray must exist before navigator is built so the plugins getter can use it.
-function PluginArray(items) {
-  for (var _pi = 0; _pi < items.length; _pi++) this[_pi] = items[_pi];
-  this.length = items.length;
+// PluginArray, Plugin, MimeTypeArray and MimeType as Chrome shapes them:
+// not arrays, values behind prototype getters, and on the instance only the
+// read-only index properties plus non-enumerable named ones. Each plugin owns
+// its own MimeType objects whose enabledPlugin points back at it. Interface
+// objects, not constructible from script. (Must exist before navigator.)
+var _pluginState = new WeakMap();
+const _pluginToken = Symbol('plugin');
+function _pluginSlot(o) { const s = _pluginState.get(o); if (!s) throw new TypeError('Illegal invocation'); return s; }
+function _pluginIface(name, getters, methods) {
+  const C = { [name]: function() { if (arguments[0] !== _pluginToken) throw new TypeError('Illegal constructor'); } }[name];
+  getters.forEach(function(k) {
+    Object.defineProperty(C.prototype, k, { get: _markNativeAs(function() { return _pluginSlot(this)[k]; }, 'function get ' + k + '() { [native code] }'), set: undefined, enumerable: true, configurable: true });
+  });
+  Object.keys(methods || {}).forEach(function(k) {
+    Object.defineProperty(C.prototype, k, { value: _markNativeAs(methods[k], 'function ' + k + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+  });
+  const ctor = Object.getOwnPropertyDescriptor(C.prototype, 'constructor');
+  delete C.prototype.constructor;
+  Object.defineProperty(C.prototype, 'constructor', ctor);
+  Object.defineProperty(C.prototype, Symbol.toStringTag, { value: name, configurable: true });
+  _markNative(C);
+  return C;
 }
-PluginArray.prototype = Object.create(Array.prototype);
-PluginArray.prototype.constructor = PluginArray;
-PluginArray.prototype.item = function(i) { return this[i] || null; };
-PluginArray.prototype.namedItem = function(name) {
-  for (var _pi = 0; _pi < this.length; _pi++) {
-    if (this[_pi].name === name) return this[_pi];
-  }
-  return null;
-};
-PluginArray.prototype.refresh = function() {};
-PluginArray.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(PluginArray.prototype, Symbol.toStringTag, {value: 'PluginArray', configurable: true});
-_markNative(PluginArray);
-_markNative(PluginArray.prototype.item);
-_markNative(PluginArray.prototype.namedItem);
-_markNative(PluginArray.prototype.refresh);
-
-// Plugin / MimeType / MimeTypeArray global interfaces. Chrome exposes these as
-// global constructors; their absence threw "ReferenceError: Plugin is not
-// defined" in site bundles that reference them (issue #305). Plain function
-// declarations (no globalThis assignment) so they survive the V8 snapshot, the
-// same pattern PluginArray uses.
-function Plugin(name, filename, description, mimeTypes) {
-  this.name = name;
-  this.filename = filename;
-  this.description = description;
-  var mt = mimeTypes || [];
-  for (var _i = 0; _i < mt.length; _i++) this[_i] = mt[_i];
-  this.length = mt.length;
+const _itemAt = function item(i) { const s = _pluginSlot(this); return s.items[i >>> 0] || null; };
+const _namedItem = function namedItem(n) { const s = _pluginSlot(this); n = String(n); return s.items.find(function(x) { return s.key(x) === n; }) || null; };
+const PluginArray = _pluginIface('PluginArray', ['length'], { item: _itemAt, namedItem: _namedItem, refresh: function refresh() {} });
+const Plugin = _pluginIface('Plugin', ['name', 'filename', 'description', 'length'], { item: _itemAt, namedItem: _namedItem });
+const MimeTypeArray = _pluginIface('MimeTypeArray', ['length'], { item: _itemAt, namedItem: _namedItem });
+const MimeType = _pluginIface('MimeType', ['type', 'suffixes', 'description', 'enabledPlugin']);
+[PluginArray, Plugin, MimeTypeArray].forEach(function(C) {
+  Object.defineProperty(C.prototype, Symbol.iterator, { value: Array.prototype.values, writable: true, configurable: true });
+});
+// A list object: read-only index properties and non-enumerable named ones.
+function _pluginList(C, items, key, extra) {
+  const o = Object.create(C.prototype);
+  _pluginState.set(o, Object.assign({ items: items, key: key, length: items.length }, extra || {}));
+  items.forEach(function(x, i) { Object.defineProperty(o, i, { value: x, writable: false, enumerable: true, configurable: true }); });
+  items.forEach(function(x) { Object.defineProperty(o, key(x), { value: x, writable: false, enumerable: false, configurable: true }); });
+  return o;
 }
-Plugin.prototype.item = function(i) { return this[i] || null; };
-Plugin.prototype.namedItem = function(name) {
-  for (var _i = 0; _i < this.length; _i++) if (this[_i] && this[_i].type === name) return this[_i];
-  return null;
-};
-Plugin.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(Plugin.prototype, Symbol.toStringTag, {value: 'Plugin', configurable: true});
-_markNative(Plugin);
-_markNative(Plugin.prototype.item);
-_markNative(Plugin.prototype.namedItem);
-
-function MimeType(type, description, suffixes, plugin) {
-  this.type = type;
-  this.description = description;
-  this.suffixes = suffixes;
-  this.enabledPlugin = plugin || null;
+const _PDF_MIMES = [['application/pdf', 'pdf', 'Portable Document Format'], ['text/pdf', 'pdf', 'Portable Document Format']];
+function _makeMimeType(m, plugin) {
+  const o = Object.create(MimeType.prototype);
+  _pluginState.set(o, { type: m[0], suffixes: m[1], description: m[2], enabledPlugin: plugin });
+  return o;
 }
-Object.defineProperty(MimeType.prototype, Symbol.toStringTag, {value: 'MimeType', configurable: true});
-_markNative(MimeType);
-
-function MimeTypeArray(items) {
-  for (var _i = 0; _i < items.length; _i++) this[_i] = items[_i];
-  this.length = items.length;
+function _makePlugin(name) {
+  const mimes = [];
+  const plugin = _pluginList(Plugin, mimes, function(x) { return _pluginSlot(x).type; },
+    { name: name, filename: 'internal-pdf-viewer', description: 'Portable Document Format' });
+  _PDF_MIMES.forEach(function(m) { mimes.push(_makeMimeType(m, plugin)); });
+  // Re-list now that the mime types exist (they need their plugin first).
+  mimes.forEach(function(x, i) { Object.defineProperty(plugin, i, { value: x, writable: false, enumerable: true, configurable: true }); });
+  mimes.forEach(function(x) { Object.defineProperty(plugin, _pluginSlot(x).type, { value: x, writable: false, enumerable: false, configurable: true }); });
+  _pluginSlot(plugin).length = mimes.length;
+  return plugin;
 }
-MimeTypeArray.prototype.item = function(i) { return this[i] || null; };
-MimeTypeArray.prototype.namedItem = function(name) {
-  for (var _i = 0; _i < this.length; _i++) if (this[_i] && this[_i].type === name) return this[_i];
-  return null;
-};
-MimeTypeArray.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(MimeTypeArray.prototype, Symbol.toStringTag, {value: 'MimeTypeArray', configurable: true});
-_markNative(MimeTypeArray);
-_markNative(MimeTypeArray.prototype.item);
-_markNative(MimeTypeArray.prototype.namedItem);
+function _makePluginArrays() {
+  const plugins = ['PDF Viewer', 'Chrome PDF Viewer', 'Chromium PDF Viewer', 'Microsoft Edge PDF Viewer', 'WebKit built-in PDF'].map(_makePlugin);
+  const first = plugins[0];
+  const mimeTypes = _PDF_MIMES.map(function(m) { return _makeMimeType(m, first); });
+  return {
+    plugins: _pluginList(PluginArray, plugins, function(x) { return _pluginSlot(x).name; }),
+    mimeTypes: _pluginList(MimeTypeArray, mimeTypes, function(x) { return _pluginSlot(x).type; }),
+  };
+}
 
 globalThis.Navigator = Navigator;
 globalThis.PluginArray = PluginArray;
@@ -7284,17 +7281,9 @@ globalThis.navigator = {
   defGetter('languages', function() { return globalThis.__obscura_languages || ["en-US", "en"]; });
 
   // Cache plugins/mimeTypes so navigator.plugins === navigator.plugins.
-  var _plugins = new PluginArray([
-    new Plugin("PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Chrome PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Chromium PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Microsoft Edge PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("WebKit built-in PDF", "internal-pdf-viewer", "Portable Document Format", []),
-  ]);
-  var _mimeTypes = new MimeTypeArray([
-    new MimeType("application/pdf", "Portable Document Format", "pdf", null),
-    new MimeType("text/pdf", "Portable Document Format", "pdf", null),
-  ]);
+  var _pluginArrays = _makePluginArrays();
+  var _plugins = _pluginArrays.plugins;
+  var _mimeTypes = _pluginArrays.mimeTypes;
   defGetter('plugins', function() { return _plugins; });
   defGetter('mimeTypes', function() { return _mimeTypes; });
 
@@ -16317,6 +16306,8 @@ var _perfTimeline = null;
 // Resource Timing: records a PerformanceResourceTiming entry (set by 4b), and
 // the unwrapped clock obscura's own code reads (never the page's performance.now).
 var _perfRecordResource = null;
+// Interface-shape passes that must see every shim; run at the end of bootstrap.
+var _lateShapes = [];
 // initiatorType for the next internal fetch (XMLHttpRequest goes through fetch).
 var _fetchInitiator = null;
 (function _interfaceFidelity() {
@@ -16870,6 +16861,206 @@ var _fetchInitiator = null;
     ].forEach(function(e) { try { adopt(nav[e[0]], e[1], e[2]); } catch (err) {} });
   }
   if (globalThis.speechSynthesis) adopt(globalThis.speechSynthesis, 'SpeechSynthesis', ET);
+
+  // Navigator.prototype with Chrome 154's members, in its order. Members the
+  // shim lacked get Chrome-shaped stand-ins (the member list and a for-in
+  // walk of navigator are common fingerprints; vendorSub was undefined).
+  _lateShapes.push(function _navigatorChromeShape() {
+    var NP = Navigator.prototype;
+    var ORDER = ["vendorSub", "productSub", "vendor", "maxTouchPoints", "scheduling", "userActivation", "geolocation", "doNotTrack", "webkitTemporaryStorage", "webkitPersistentStorage", "windowControlsOverlay", "hardwareConcurrency", "cookieEnabled", "appCodeName", "appName", "appVersion", "platform", "product", "userAgent", "language", "languages", "onLine", "webdriver", "plugins", "mimeTypes", "pdfViewerEnabled", "connection", "getGamepads", "javaEnabled", "sendBeacon", "vibrate", "constructor", "cpuPerformance", "deprecatedRunAdAuctionEnforcesKAnonymity", "protectedAudience", "bluetooth", "clipboard", "credentials", "keyboard", "managed", "mediaDevices", "serviceWorker", "virtualKeyboard", "wakeLock", "deviceMemory", "userAgentData", "locks", "storage", "gpu", "login", "ink", "mediaCapabilities", "permissions", "devicePosture", "hid", "mediaSession", "presentation", "serial", "usb", "xr", "storageBuckets", "adAuctionComponents", "runAdAuction", "canLoadAdAuctionFencedFrame", "canShare", "share", "clearAppBadge", "getBattery", "getUserMedia", "requestMIDIAccess", "requestMediaKeySystemAccess", "setAppBadge", "webkitGetUserMedia", "clearOriginJoinedAdInterestGroups", "createAuctionNonce", "joinAdInterestGroup", "leaveAdInterestGroup", "updateAdInterestGroups", "deprecatedReplaceInURN", "deprecatedURNToURL", "getInstalledRelatedApps", "getInterestGroupAdAuctionData", "registerProtocolHandler", "unregisterProtocolHandler"];
+    var cache = {};
+    var mk = function(name, parentProto, members) {
+      var C = iface(name, parentProto || Object.prototype);
+      var slots = new WeakMap();
+      Object.keys(members || {}).forEach(function(k) {
+        var m = members[k];
+        if (typeof m === 'function') {
+          Object.defineProperty(C.prototype, k, { value: _markNativeAs(m, 'function ' + k + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+        } else {
+          Object.defineProperty(C.prototype, k, {
+            get: _markNativeAs(function() { return (slots.get(this) || {})[k] !== undefined ? slots.get(this)[k] : m.value; }, 'function get ' + k + '() { [native code] }'),
+            set: m.settable ? _markNativeAs(function(v) { var st = slots.get(this); if (st) st[k] = v; }, 'function set ' + k + '() { [native code] }') : undefined,
+            enumerable: true, configurable: true,
+          });
+        }
+      });
+      var o = Object.create(C.prototype);
+      slots.set(o, {});
+      return o;
+    };
+    var ET = EventTarget.prototype;
+    var reject = function(name, msg) { return Promise.reject(new DOMException(msg || 'Not allowed.', name || 'NotAllowedError')); };
+    var active = { has: false, until: 0 };
+    var markTrusted = globalThis.__obscura_markTrusted;
+    globalThis.__obscura_markTrusted = function(ev) {
+      var r = markTrusted(ev);
+      try { if (ev && /^(click|keydown|mousedown|pointerdown|pointerup|touchend)$/.test(ev.type)) { active.has = true; active.until = Date.now() + 5000; } } catch (_e) {}
+      return r;
+    };
+    var getters = {
+      vendorSub: function() { return ''; },
+      cpuPerformance: function() { return (globalThis.__obscura_hw || navigator.hardwareConcurrency || 8) >= 16 ? 4 : 3; },
+      deprecatedRunAdAuctionEnforcesKAnonymity: function() { return false; },
+      userActivation: function() {
+        return cache.ua || (cache.ua = (function() {
+          var C = iface('UserActivation');
+          Object.defineProperty(C.prototype, 'hasBeenActive', { get: _markNativeAs(function() { return active.has; }, 'function get hasBeenActive() { [native code] }'), set: undefined, enumerable: true, configurable: true });
+          Object.defineProperty(C.prototype, 'isActive', { get: _markNativeAs(function() { return Date.now() < active.until; }, 'function get isActive() { [native code] }'), set: undefined, enumerable: true, configurable: true });
+          return Object.create(C.prototype);
+        })());
+      },
+      webkitTemporaryStorage: function() {
+        return cache.wts || (cache.wts = mk('DeprecatedStorageQuota', null, {
+          queryUsageAndQuota: function queryUsageAndQuota(ok) { if (typeof ok === 'function') setTimeout(function() { ok(0, 296630877388); }, 0); },
+          requestQuota: function requestQuota(size, ok) { if (typeof ok === 'function') setTimeout(function() { ok(0); }, 0); },
+        }));
+      },
+      webkitPersistentStorage: function() { return getters.webkitTemporaryStorage(); },
+      windowControlsOverlay: function() {
+        return cache.wco || (cache.wco = mk('WindowControlsOverlay', ET, {
+          visible: { value: false }, ongeometrychange: { value: null, settable: true },
+          getTitlebarAreaRect: function getTitlebarAreaRect() { return new DOMRect(0, 0, 0, 0); },
+        }));
+      },
+      protectedAudience: function() {
+        return cache.pa || (cache.pa = mk('ProtectedAudience', null, { queryFeatureSupport: function queryFeatureSupport() { return false; } }));
+      },
+      managed: function() {
+        return cache.mg || (cache.mg = mk('NavigatorManagedData', ET, {
+          onmanagedconfigurationchange: { value: null, settable: true },
+          getManagedConfiguration: function getManagedConfiguration() { return reject('NotAllowedError', 'Service connection error. This API is available only for managed apps.'); },
+        }));
+      },
+      virtualKeyboard: function() {
+        return cache.vk || (cache.vk = mk('VirtualKeyboard', ET, {
+          boundingRect: { value: new DOMRect(0, 0, 0, 0) }, overlaysContent: { value: false, settable: true },
+          ongeometrychange: { value: null, settable: true },
+          hide: function hide() {}, show: function show() {},
+        }));
+      },
+      login: function() {
+        return cache.lg || (cache.lg = mk('NavigatorLogin', null, { setStatus: function setStatus() { return Promise.resolve(); } }));
+      },
+      ink: function() {
+        return cache.ink || (cache.ink = mk('Ink', null, { requestPresenter: function requestPresenter() { return reject('NotSupportedError', 'Ink presentation is not supported.'); } }));
+      },
+      devicePosture: function() {
+        return cache.dp || (cache.dp = mk('DevicePosture', ET, { type: { value: 'continuous' }, onchange: { value: null, settable: true } }));
+      },
+      presentation: function() {
+        return cache.pr || (cache.pr = mk('Presentation', null, { defaultRequest: { value: null, settable: true }, receiver: { value: null } }));
+      },
+      xr: function() {
+        return cache.xr || (cache.xr = mk('XRSystem', ET, {
+          ondevicechange: { value: null, settable: true },
+          isSessionSupported: function isSessionSupported() { return Promise.resolve(false); },
+          requestSession: function requestSession() { return reject('NotSupportedError', 'The specified session configuration is not supported.'); },
+        }));
+      },
+      storageBuckets: function() {
+        return cache.sb || (cache.sb = mk('StorageBucketManager', null, {
+          delete: function() { return Promise.resolve(); },
+          keys: function keys() { return Promise.resolve([]); },
+          open: function open() { return reject('NotAllowedError', 'Storage buckets are not available.'); },
+        }));
+      },
+    };
+    var fns = {
+      vibrate: [1, function vibrate() { return true; }],
+      adAuctionComponents: [1, function adAuctionComponents() { return []; }],
+      runAdAuction: [1, function runAdAuction() { return reject('NotAllowedError', 'Feature join-ad-interest-group is not enabled by Permissions Policy'); }],
+      canLoadAdAuctionFencedFrame: [0, function canLoadAdAuctionFencedFrame() { return false; }],
+      clearAppBadge: [0, function clearAppBadge() { return Promise.resolve(); }],
+      setAppBadge: [0, function setAppBadge() { return Promise.resolve(); }],
+      getUserMedia: [3, function getUserMedia(c, ok, err) { if (typeof err === 'function') setTimeout(function() { err(new DOMException('Permission denied', 'NotAllowedError')); }, 0); }],
+      webkitGetUserMedia: [3, function webkitGetUserMedia(c, ok, err) { if (typeof err === 'function') setTimeout(function() { err(new DOMException('Permission denied', 'NotAllowedError')); }, 0); }],
+      requestMIDIAccess: [0, function requestMIDIAccess() { return reject('NotAllowedError', 'Permission denied.'); }],
+      requestMediaKeySystemAccess: [2, function requestMediaKeySystemAccess() { return reject('NotSupportedError', 'Unsupported keySystem or supportedConfigurations.'); }],
+      clearOriginJoinedAdInterestGroups: [1, function clearOriginJoinedAdInterestGroups() { return Promise.resolve(); }],
+      createAuctionNonce: [0, function createAuctionNonce() { return Promise.resolve(crypto.randomUUID()); }],
+      joinAdInterestGroup: [1, function joinAdInterestGroup() { return reject('NotAllowedError', 'Feature join-ad-interest-group is not enabled by Permissions Policy'); }],
+      leaveAdInterestGroup: [0, function leaveAdInterestGroup() { return Promise.resolve(); }],
+      updateAdInterestGroups: [0, function updateAdInterestGroups() {}],
+      deprecatedReplaceInURN: [2, function deprecatedReplaceInURN() { return Promise.reject(new TypeError('Passed URL must be a valid URN URL.')); }],
+      deprecatedURNToURL: [1, function deprecatedURNToURL() { return Promise.reject(new TypeError('Passed URL must be a valid URN URL.')); }],
+      getInstalledRelatedApps: [0, function getInstalledRelatedApps() { return Promise.resolve([]); }],
+      getInterestGroupAdAuctionData: [1, function getInterestGroupAdAuctionData() { return reject('NotAllowedError', 'Feature run-ad-auction is not enabled by Permissions Policy'); }],
+      registerProtocolHandler: [2, function registerProtocolHandler() {}],
+      unregisterProtocolHandler: [2, function unregisterProtocolHandler() {}],
+    };
+    var saved = {};
+    Object.getOwnPropertyNames(NP).forEach(function(k) { saved[k] = Object.getOwnPropertyDescriptor(NP, k); delete NP[k]; });
+    ORDER.forEach(function(k) {
+      if (saved[k]) { Object.defineProperty(NP, k, saved[k]); return; }
+      if (getters[k]) {
+        Object.defineProperty(NP, k, { get: _markNativeAs(getters[k], 'function get ' + k + '() { [native code] }'), set: undefined, enumerable: true, configurable: true });
+      } else if (fns[k]) {
+        var f = fns[k][1];
+        Object.defineProperty(f, 'length', { value: fns[k][0], configurable: true });
+        Object.defineProperty(NP, k, { value: _markNativeAs(f, 'function ' + k + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+      }
+    });
+    // Keep anything the shim has that Chrome's list lacks (after Chrome's).
+    Object.keys(saved).forEach(function(k) { if (!Object.prototype.hasOwnProperty.call(NP, k)) Object.defineProperty(NP, k, saved[k]); });
+    // Create the lazily built interfaces now so the conformance pass sees them;
+    // DeprecatedStorageQuota has no interface object in Chrome.
+    ['userActivation', 'webkitTemporaryStorage', 'windowControlsOverlay', 'protectedAudience', 'managed', 'virtualKeyboard',
+     'login', 'ink', 'devicePosture', 'presentation', 'xr', 'storageBuckets'].forEach(function(k) { try { getters[k](); } catch (_e) {} });
+    delete globalThis.DeprecatedStorageQuota;
+  });
+
+  // Chrome 154's prototype shapes for the navigator sub-object interfaces
+  // (captured with Object.getOwnPropertyNames): member order, kinds, function
+  // lengths and parent. Existing shim members are kept and reordered; missing
+  // ones get inert stand-ins; members Chrome lacks are dropped.
+  _lateShapes.push(function _conformToChrome() {
+    var SNAP = {"Scheduling":{"parent":null,"members":[["isInputPending","fn",0],["constructor","ctor"]]},"UserActivation":{"parent":null,"members":[["hasBeenActive","get"],["isActive","get"],["constructor","ctor"]]},"Geolocation":{"parent":null,"members":[["clearWatch","fn",1],["getCurrentPosition","fn",1],["watchPosition","fn",1],["constructor","ctor"]]},"WindowControlsOverlay":{"parent":"EventTarget","members":[["visible","get"],["ongeometrychange","getset"],["getTitlebarAreaRect","fn",0],["constructor","ctor"]]},"PluginArray":{"parent":null,"members":[["length","get"],["item","fn",1],["namedItem","fn",1],["refresh","fn",0],["constructor","ctor"]]},"MimeTypeArray":{"parent":null,"members":[["length","get"],["item","fn",1],["namedItem","fn",1],["constructor","ctor"]]},"NetworkInformation":{"parent":"EventTarget","members":[["onchange","getset"],["effectiveType","get"],["rtt","get"],["downlink","get"],["saveData","get"],["constructor","ctor"]]},"ProtectedAudience":{"parent":null,"members":[["queryFeatureSupport","fn",1],["constructor","ctor"]]},"Bluetooth":{"parent":"EventTarget","members":[["getAvailability","fn",0],["requestDevice","fn",0],["constructor","ctor"]]},"Clipboard":{"parent":"EventTarget","members":[["onclipboardchange","getset"],["read","fn",0],["readText","fn",0],["write","fn",1],["writeText","fn",1],["constructor","ctor"]]},"CredentialsContainer":{"parent":null,"members":[["create","fn",0],["get","fn",0],["preventSilentAccess","fn",0],["store","fn",1],["constructor","ctor"]]},"Keyboard":{"parent":null,"members":[["getLayoutMap","fn",0],["lock","fn",0],["unlock","fn",0],["constructor","ctor"]]},"NavigatorManagedData":{"parent":"EventTarget","members":[["onmanagedconfigurationchange","getset"],["getManagedConfiguration","fn",1],["constructor","ctor"]]},"MediaDevices":{"parent":"EventTarget","members":[["ondevicechange","getset"],["enumerateDevices","fn",0],["getSupportedConstraints","fn",0],["getUserMedia","fn",0],["getDisplayMedia","fn",0],["setCaptureHandleConfig","fn",0],["constructor","ctor"]]},"ServiceWorkerContainer":{"parent":"EventTarget","members":[["controller","get"],["ready","get"],["oncontrollerchange","getset"],["onmessage","getset"],["onmessageerror","getset"],["getRegistration","fn",0],["getRegistrations","fn",0],["register","fn",1],["startMessages","fn",0],["constructor","ctor"]]},"VirtualKeyboard":{"parent":"EventTarget","members":[["boundingRect","get"],["overlaysContent","getset"],["ongeometrychange","getset"],["hide","fn",0],["show","fn",0],["constructor","ctor"]]},"WakeLock":{"parent":null,"members":[["request","fn",0],["constructor","ctor"]]},"NavigatorUAData":{"parent":null,"members":[["brands","get"],["mobile","get"],["platform","get"],["getHighEntropyValues","fn",1],["toJSON","fn",0],["constructor","ctor"]]},"LockManager":{"parent":null,"members":[["query","fn",0],["request","fn",2],["constructor","ctor"]]},"StorageManager":{"parent":null,"members":[["estimate","fn",0],["persisted","fn",0],["constructor","ctor"],["getDirectory","fn",0],["persist","fn",0]]},"GPU":{"parent":null,"members":[["wgslLanguageFeatures","get"],["getPreferredCanvasFormat","fn",0],["requestAdapter","fn",0],["constructor","ctor"]]},"NavigatorLogin":{"parent":null,"members":[["setStatus","fn",1],["constructor","ctor"]]},"Ink":{"parent":null,"members":[["requestPresenter","fn",0],["constructor","ctor"]]},"MediaCapabilities":{"parent":null,"members":[["decodingInfo","fn",1],["encodingInfo","fn",1],["constructor","ctor"]]},"Permissions":{"parent":null,"members":[["query","fn",1],["constructor","ctor"]]},"DevicePosture":{"parent":"EventTarget","members":[["type","get"],["onchange","getset"],["constructor","ctor"]]},"HID":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getDevices","fn",0],["constructor","ctor"],["requestDevice","fn",1]]},"MediaSession":{"parent":null,"members":[["metadata","getset"],["playbackState","getset"],["setActionHandler","fn",2],["setCameraActive","fn",1],["setMicrophoneActive","fn",1],["setPositionState","fn",0],["constructor","ctor"]]},"Presentation":{"parent":null,"members":[["defaultRequest","getset"],["receiver","get"],["constructor","ctor"]]},"Serial":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getPorts","fn",0],["constructor","ctor"],["requestPort","fn",0]]},"USB":{"parent":"EventTarget","members":[["onconnect","getset"],["ondisconnect","getset"],["getDevices","fn",0],["constructor","ctor"],["requestDevice","fn",1]]},"XRSystem":{"parent":"EventTarget","members":[["ondevicechange","getset"],["isSessionSupported","fn",1],["requestSession","fn",1],["constructor","ctor"]]},"StorageBucketManager":{"parent":null,"members":[["delete","fn",1],["keys","fn",0],["open","fn",1],["constructor","ctor"]]},"Plugin":{"parent":null,"members":[["name","get"],["filename","get"],["description","get"],["length","get"],["item","fn",1],["namedItem","fn",1],["constructor","ctor"]]},"MimeType":{"parent":null,"members":[["type","get"],["suffixes","get"],["description","get"],["enabledPlugin","get"],["constructor","ctor"]]},"Navigator":{"parent":null,"members":[["vendorSub","get"],["productSub","get"],["vendor","get"],["maxTouchPoints","get"],["scheduling","get"],["userActivation","get"],["geolocation","get"],["doNotTrack","get"],["webkitTemporaryStorage","get"],["webkitPersistentStorage","get"],["windowControlsOverlay","get"],["hardwareConcurrency","get"],["cookieEnabled","get"],["appCodeName","get"],["appName","get"],["appVersion","get"],["platform","get"],["product","get"],["userAgent","get"],["language","get"],["languages","get"],["onLine","get"],["webdriver","get"],["plugins","get"],["mimeTypes","get"],["pdfViewerEnabled","get"],["connection","get"],["getGamepads","fn",0],["javaEnabled","fn",0],["sendBeacon","fn",1],["vibrate","fn",1],["constructor","ctor"],["cpuPerformance","get"],["deprecatedRunAdAuctionEnforcesKAnonymity","get"],["protectedAudience","get"],["bluetooth","get"],["clipboard","get"],["credentials","get"],["keyboard","get"],["managed","get"],["mediaDevices","get"],["serviceWorker","get"],["virtualKeyboard","get"],["wakeLock","get"],["deviceMemory","get"],["userAgentData","get"],["locks","get"],["storage","get"],["gpu","get"],["login","get"],["ink","get"],["mediaCapabilities","get"],["permissions","get"],["devicePosture","get"],["hid","get"],["mediaSession","get"],["presentation","get"],["serial","get"],["usb","get"],["xr","get"],["storageBuckets","get"],["adAuctionComponents","fn",1],["runAdAuction","fn",1],["canLoadAdAuctionFencedFrame","fn",0],["canShare","fn",0],["share","fn",0],["clearAppBadge","fn",0],["getBattery","fn",0],["getUserMedia","fn",3],["requestMIDIAccess","fn",0],["requestMediaKeySystemAccess","fn",2],["setAppBadge","fn",0],["webkitGetUserMedia","fn",3],["clearOriginJoinedAdInterestGroups","fn",1],["createAuctionNonce","fn",0],["joinAdInterestGroup","fn",1],["leaveAdInterestGroup","fn",0],["updateAdInterestGroups","fn",0],["deprecatedReplaceInURN","fn",2],["deprecatedURNToURL","fn",1],["getInstalledRelatedApps","fn",0],["getInterestGroupAdAuctionData","fn",1],["registerProtocolHandler","fn",2],["unregisterProtocolHandler","fn",2]]}};
+    Object.keys(SNAP).forEach(function(name) {
+      var C = globalThis[name];
+      if (typeof C !== 'function' || !C.prototype) return;
+      var spec = SNAP[name], P = C.prototype;
+      if (spec.parent === 'EventTarget' && !EventTarget.prototype.isPrototypeOf(P)) Object.setPrototypeOf(P, EventTarget.prototype);
+      var saved = {};
+      Object.getOwnPropertyNames(P).forEach(function(k) { saved[k] = Object.getOwnPropertyDescriptor(P, k); delete P[k]; });
+      var slots = new WeakMap();
+      spec.members.forEach(function(m) {
+        var k = m[0], kind = m[1], d = saved[k];
+        if (d) {
+          if (kind === 'fn' && typeof d.value === 'function' && d.value.length !== m[2]) {
+            try { Object.defineProperty(d.value, 'length', { value: m[2], configurable: true }); } catch (_e) {}
+          }
+          if (kind === 'getset' && d.get && !d.set) {
+            // Settable in Chrome (e.g. mediaSession.metadata): keep the
+            // shim's value until script assigns one.
+            var origGet = d.get;
+            d.get = _markNativeAs(function() { var st = slots.get(this); return st && k in st ? st[k] : origGet.call(this); }, 'function get ' + k + '() { [native code] }');
+            d.set = _markNativeAs(function(v) { var st = slots.get(this); if (!st) slots.set(this, st = {}); st[k] = v; }, 'function set ' + k + '() { [native code] }');
+          }
+          if (d.get && !d.enumerable) d.enumerable = true;
+          if (typeof d.value === 'function' && k !== 'constructor') d.enumerable = true;
+          Object.defineProperty(P, k, d);
+          return;
+        }
+        if (kind === 'fn') {
+          var f = { [k]: function() { return Promise.reject(new DOMException('Not supported.', 'NotSupportedError')); } }[k];
+          Object.defineProperty(f, 'length', { value: m[2], configurable: true });
+          Object.defineProperty(P, k, { value: _markNativeAs(f, 'function ' + k + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+        } else if (kind === 'get' || kind === 'getset') {
+          Object.defineProperty(P, k, {
+            get: _markNativeAs(function() { var st = slots.get(this); return st && k in st ? st[k] : null; }, 'function get ' + k + '() { [native code] }'),
+            set: kind === 'getset' ? _markNativeAs(function(v) { var st = slots.get(this); if (!st) slots.set(this, st = {}); st[k] = typeof v === 'function' ? v : null; }, 'function set ' + k + '() { [native code] }') : undefined,
+            enumerable: true, configurable: true,
+          });
+        } else if (kind === 'value') {
+          Object.defineProperty(P, k, { value: m[2], writable: false, enumerable: true, configurable: false });
+        }
+      });
+      // Keep obscura-internal members (underscore); Chrome has none of the rest.
+      Object.keys(saved).forEach(function(k) {
+        if (!Object.prototype.hasOwnProperty.call(P, k) && k.charAt(0) === '_') Object.defineProperty(P, k, saved[k]);
+      });
+    });
+  });
   // Voices are SpeechSynthesisVoice objects: attributes on the prototype.
   (function() {
     var SV = iface('SpeechSynthesisVoice');
@@ -17383,6 +17574,9 @@ globalThis.__obscura_init = function() {
 // _preHideInternals are already non-enumerable, so Object.keys would omit them
 // and leave them out of the hide list (and thus visible to the reflection-API
 // filter and to fingerprinting scripts). getOwnPropertyNames captures them.
+_lateShapes.forEach(function(f) { f(); });
+_lateShapes.length = 0;
+
 globalThis.__obscura_hide_list = Object.getOwnPropertyNames(globalThis).filter(k =>
   k.startsWith('_') || k.includes('obscura') || k.includes('Obscura')
 );
