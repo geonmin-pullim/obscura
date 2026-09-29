@@ -71,7 +71,13 @@ fn chrome_trust_anchor_ids() -> Vec<u8> {
 }
 
 pub const STEALTH_USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
+
+/// sec-ch-ua for STEALTH_USER_AGENT, as Chrome 154 sends it. wreq-util's
+/// newest profile is 149, whose TLS/HTTP2 shape is the same, so the identity
+/// headers are set per request on top of it.
+pub const STEALTH_SEC_CH_UA: &str =
+    "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"";
 
 // The wreq emulation (Profile::Chrome149, Platform::Windows) sends this exact
 // UA and sec-ch-ua-platform "Windows" on the wire. navigator has to report the
@@ -498,6 +504,8 @@ impl StealthHttpClient {
                     .orig_headers(chrome_header_order(navigation)),
             };
             req = req
+                .header("user-agent", STEALTH_USER_AGENT)
+                .header("sec-ch-ua", STEALTH_SEC_CH_UA)
                 .header("accept", request.accept())
                 .header("sec-fetch-site", request_fetch_site(&request, &current_url))
                 .header("sec-fetch-mode", request.mode.header_value())
@@ -700,6 +708,9 @@ impl StealthHttpClient {
         if let Some(al) = crate::env_accept_language() {
             req = req.header("accept-language", al);
         }
+        req = req
+            .header("user-agent", STEALTH_USER_AGENT)
+            .header("sec-ch-ua", STEALTH_SEC_CH_UA);
         for (k, v) in self.extra_headers.read().await.iter() {
             req = req.header(k.as_str(), v.as_str());
         }

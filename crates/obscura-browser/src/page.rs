@@ -2688,6 +2688,19 @@ impl Page {
                             false,
                         );
                         if let Some(js) = &mut page.js {
+                            // Resource Timing entry for the parser-inserted script.
+                            let _ = js.execute_script(
+                                "<perf-resource>",
+                                &format!(
+                                    "try {{ __obscura_perfResource({}, 'script', {}, {}, {}); }} catch (e) {{}}",
+                                    serde_json::Value::String(execution_url.clone()),
+                                    resp.status,
+                                    resp.body.len(),
+                                    serde_json::Value::String(
+                                        resp.headers.get("content-type").cloned().unwrap_or_default()
+                                    ),
+                                ),
+                            );
                             let _ = js.execute_script(
                                 "<current-script>",
                                 &format!("globalThis.__currentScriptNid={};", script.nid),

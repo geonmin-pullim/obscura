@@ -37,8 +37,8 @@ const __obscuraCore = globalThis.Deno.core;
     '__obscura_last_mouse', '__obscura_hoverTo',
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
-    '__obscura_perfMark', '__obscura_nav', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
-    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
+    '__obscura_perfMark', '__obscura_nav', '__obscura_perfResource', '_perfRecordResource', '_perfNowInternal', '_fetchInitiator', '_fetchInternal', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
+    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -169,6 +169,10 @@ const _nativeStr = new Map();
 const _origToString = Function.prototype.toString;
 // Method syntax matches the native function's non-constructible shape and
 // does not add an own `prototype` property.
+// The unwrapped performance.now() obscura's own code reads (timers, events,
+// animations), so a page wrapping performance.now never sees internal calls.
+// Replaced by the Performance setup (4b); 0 before it.
+var _perfNowInternal = function() { return 0; };
 const _captureStackTrace = Error.captureStackTrace;
 const _functionToString = {
   toString() {
@@ -366,10 +370,15 @@ async function __fetchDynClassicScript(task) {
   if (task.url.startsWith('data:')) {
     body = _decodeDataScriptUrl(task.url);
   } else {
+    const rtStart = _perfNowInternal();
     const raw = await __obscuraCore.ops.op_fetch_url(
       task.url, "GET", "{}", new Uint8Array(0), task.pageOrigin, "no-cors", "same-origin", "script"
     );
     const parsed = JSON.parse(raw);
+    if (_perfRecordResource && parsed.status) {
+      _perfRecordResource(parsed.url || task.url, 'script', rtStart, _perfNowInternal(), parsed.status,
+        (parsed.body || '').length, parsed.headers && parsed.headers['content-type']);
+    }
     // The HTML script-fetch algorithm treats an unsuccessful HTTP response
     // as a network error. Evaluating its response body is both observably
     // unlike browsers and dangerous: JSON error payloads and diagnostic HTML
@@ -911,7 +920,7 @@ const _frameTimerStates = new Map();
 const __obscuraPendingTimeoutDeadlines = new Map();
 Object.defineProperty(globalThis, '__obscura_nextPendingTimeoutDelay', {
   value: function() {
-    const now = performance.now();
+    const now = _perfNowInternal();
     let nearest = Infinity;
     for (const deadline of __obscuraPendingTimeoutDeadlines.values()) {
       nearest = Math.min(nearest, Math.max(0, deadline - now));
@@ -1041,7 +1050,7 @@ globalThis.setTimeout = (fn, delay = 0, ...args) => {
   if (nativeId !== undefined) {
     _timerStates.set(id, state);
     _nativeTimerIds.set(id, nativeId);
-    __obscuraPendingTimeoutDeadlines.set(id, performance.now() + scheduledDelay);
+    __obscuraPendingTimeoutDeadlines.set(id, _perfNowInternal() + scheduledDelay);
   }
   return id;
 };
@@ -1155,7 +1164,7 @@ function _runAnimationFrameBatch() {
   _rafPending = new Map();
   _rafCurrentBatch = batch;
   _rafRunningFrame = true;
-  const timestamp = performance.now();
+  const timestamp = _perfNowInternal();
   try {
     for (const [id, callback] of batch) {
       // cancelAnimationFrame() may remove a later callback while an earlier
@@ -3394,13 +3403,13 @@ class Animation {
   }
   get playState() { return this._playState; }
   get currentTime() {
-    if (this._playState === 'running' && this._startTime != null) return Math.max(0, performance.now() - this._startTime);
+    if (this._playState === 'running' && this._startTime != null) return Math.max(0, _perfNowInternal() - this._startTime);
     return this._holdTime;
   }
   set currentTime(value) {
     const time = Math.max(0, Number(value) || 0);
     this._holdTime = time;
-    if (this._playState === 'running') this._startTime = performance.now() - time;
+    if (this._playState === 'running') this._startTime = _perfNowInternal() - time;
     this._native('currentTime', time);
     this._scheduleFinish();
   }
@@ -3410,7 +3419,7 @@ class Animation {
     const start = Number(value);
     if (!Number.isFinite(start)) throw new TypeError('Invalid startTime');
     this._startTime = start;
-    this._holdTime = Math.max(0, performance.now() - start);
+    this._holdTime = Math.max(0, _perfNowInternal() - start);
     this._native('currentTime', this._holdTime);
     this._scheduleFinish();
   }
@@ -3421,7 +3430,7 @@ class Animation {
       if (this._playState === 'finished') this._resetFinishedPromise();
     }
     this._register();
-    this._startTime = performance.now() - this._holdTime;
+    this._startTime = _perfNowInternal() - this._holdTime;
     this._playState = 'running';
     this._native('play');
     this.ready = Promise.resolve(this);
@@ -3472,7 +3481,7 @@ class DocumentTimeline {
   constructor(options = {}) {
     this.originTime = Number(options.originTime) || 0;
   }
-  get currentTime() { return performance.now() - this.originTime; }
+  get currentTime() { return _perfNowInternal() - this.originTime; }
 }
 
 function _animationsForTarget(target) {
@@ -7112,12 +7121,12 @@ var _GREASE_CHARS = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_'];
 var _GREASE_VER = ['8', '99', '24'];
 var _BRAND_PERMS = [[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];
 
-// Chrome's full version for the UA major, e.g. 145 -> "145.0.7632.160". Build
-// numbers advance about 73 per milestone (153 is 8010); the patch level is a
+// Chrome's full version for the UA major, e.g. 154 -> "154.0.8037.58". Build
+// numbers advance about 73 per milestone (154 is 8037); the patch level is a
 // stable pick per context.
 function _chromeFullVersion() {
   var major = +_chromeMajor();
-  var build = 8010 - (153 - major) * 73;
+  var build = 8037 - (154 - major) * 73;
   return major + ".0." + build + "." + (40 + Math.floor(_fpRand(707) * 140));
 }
 function _uaBrands() {
@@ -7131,8 +7140,13 @@ function _uaBrands() {
     {brand: 'Chromium', version: String(seed)},
     {brand: 'Google Chrome', version: String(seed)},
   ];
+  // Chromium assigns positions (shuffled[order[i]] = brand i); reading the
+  // permutation as a pick order only agrees for self-inverse ones (e.g. 149),
+  // and gave 154 as Google Chrome, Not A(Brand, Chromium.
   var p = _BRAND_PERMS[seed % 6];
-  return [ordered[p[0]], ordered[p[1]], ordered[p[2]]];
+  var out = [];
+  out[p[0]] = ordered[0]; out[p[1]] = ordered[1]; out[p[2]] = ordered[2];
+  return out;
 }
 
 // Fingerprint surfaces (UA, plugins, webdriver, etc.) live on the prototype
@@ -7149,11 +7163,14 @@ globalThis.navigator = {
     get brands() { return _uaBrands(); },
     get platform() { return globalThis.__obscura_ua_platform || "Windows"; },
     getHighEntropyValues(hints) {
+      // Chrome answers the low-entropy trio plus only the hints asked for,
+      // keys in alphabetical order.
       var brands = _uaBrands();
-      return Promise.resolve({
+      var all = {
         architecture: "x86",
         bitness: "64",
         brands: brands,
+        formFactors: ["Desktop"],
         fullVersionList: brands.map(function(b) { return {brand: b.brand, version: /Chrom/.test(b.brand) ? _chromeFullVersion() : b.version + ".0.0.0"}; }),
         mobile: false,
         model: "",
@@ -7161,7 +7178,12 @@ globalThis.navigator = {
         platformVersion: globalThis.__obscura_ua_platform_version || "15.0.0",
         uaFullVersion: _chromeFullVersion(),
         wow64: false,
-      });
+      };
+      var want = {brands: 1, mobile: 1, platform: 1};
+      (Array.isArray(hints) ? hints : []).forEach(function(h) { want[String(h)] = 1; });
+      var out = {};
+      Object.keys(all).forEach(function(k) { if (want[k]) out[k] = all[k]; });
+      return Promise.resolve(out);
     },
     toJSON() { return {brands:this.brands,mobile:this.mobile,platform:this.platform}; },
   },
@@ -7247,12 +7269,12 @@ globalThis.navigator = {
   defGetter('userAgent', function() {
     return globalThis.__obscura_ua ||
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-      "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+      "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
   });
   defGetter('appVersion', function() {
     return (globalThis.__obscura_ua ||
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-      "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36").replace('Mozilla/', '');
+      "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36").replace('Mozilla/', '');
   });
   defGetter('platform', function() {
     return globalThis.__obscura_platform || "Win32";
@@ -7467,33 +7489,71 @@ function _newGLContext(canvas, v2) {
   return ctx;
 }
 
-class Screen {
-  constructor(w, h, availW, availH) {
-    this._w = w; this._h = h;
-    this._availW = availW === undefined ? w : availW;
-    this._availH = availH === undefined ? h - 40 : availH;
-    this.colorDepth = 24; this.pixelDepth = 24; this.availTop = 0; this.availLeft = 0;
-    this.orientation = {type:'landscape-primary',angle:0,addEventListener(){},removeEventListener(){},dispatchEvent(){return true;}};
-  }
-  get width() { return this._w; }
-  get height() { return this._h; }
-  get availWidth() { return this._availW; }
-  get availHeight() { return this._availH; }
+// Screen and ScreenOrientation as Chrome shapes them: EventTargets whose
+// values are prototype getters; neither object has own properties (the old
+// shim kept _w/_h/colorDepth/orientation on the instance).
+const _screenState = new WeakMap();
+const _screenToken = Symbol('screen');
+function _screenSlot(o) { const s = _screenState.get(o); if (!s) throw new TypeError('Illegal invocation'); return s; }
+function _screenGetter(C, k, fn) {
+  Object.defineProperty(C.prototype, k, { get: _markNativeAs(fn, 'function get ' + k + '() { [native code] }'), set: undefined, enumerable: true, configurable: true });
 }
-['width','height','availWidth','availHeight'].forEach(function(k) {
-  var d = Object.getOwnPropertyDescriptor(Screen.prototype, k);
-  if (d && d.get) _markNative(d.get);
-});
+function _screenHandler(C, k) {
+  Object.defineProperty(C.prototype, k, {
+    get: _markNativeAs(function() { return _screenSlot(this)[k]; }, 'function get ' + k + '() { [native code] }'),
+    set: _markNativeAs(function(v) { _screenSlot(this)[k] = typeof v === 'function' ? v : null; }, 'function set ' + k + '() { [native code] }'),
+    enumerable: true, configurable: true,
+  });
+}
+class ScreenOrientation extends EventTarget {
+  constructor(token, screenState) {
+    if (token !== _screenToken) throw new TypeError('Illegal constructor');
+    super();
+    _screenState.set(this, { screen: screenState, onchange: null });
+  }
+}
+_screenGetter(ScreenOrientation, 'angle', function() { _screenSlot(this); return 0; });
+_screenGetter(ScreenOrientation, 'type', function() { const s = _screenSlot(this).screen; return s.w >= s.h ? 'landscape-primary' : 'portrait-primary'; });
+_screenHandler(ScreenOrientation, 'onchange');
+Object.defineProperty(ScreenOrientation.prototype, 'lock', { value: _markNativeAs(function lock() { _screenSlot(this); return Promise.reject(new DOMException('screen.orientation.lock() is not available on this device.', 'NotSupportedError')); }, 'function lock() { [native code] }'), writable: true, enumerable: true, configurable: true });
+Object.defineProperty(ScreenOrientation.prototype, 'unlock', { value: _markNativeAs(function unlock() { _screenSlot(this); }, 'function unlock() { [native code] }'), writable: true, enumerable: true, configurable: true });
+class Screen extends EventTarget {
+  constructor(token, w, h, availW, availH) {
+    if (token !== _screenToken) throw new TypeError('Illegal constructor');
+    super();
+    const st = { w: w, h: h, availW: availW === undefined ? w : availW, availH: availH === undefined ? h - 40 : availH, onchange: null };
+    st.orientation = new ScreenOrientation(_screenToken, st);
+    _screenState.set(this, st);
+  }
+}
+_screenGetter(Screen, 'availWidth', function() { return _screenSlot(this).availW; });
+_screenGetter(Screen, 'availHeight', function() { return _screenSlot(this).availH; });
+_screenGetter(Screen, 'width', function() { return _screenSlot(this).w; });
+_screenGetter(Screen, 'height', function() { return _screenSlot(this).h; });
+_screenGetter(Screen, 'colorDepth', function() { _screenSlot(this); return 24; });
+_screenGetter(Screen, 'pixelDepth', function() { _screenSlot(this); return 24; });
+_screenGetter(Screen, 'availLeft', function() { _screenSlot(this); return 0; });
+_screenGetter(Screen, 'availTop', function() { _screenSlot(this); return 0; });
+_screenGetter(Screen, 'orientation', function() { return _screenSlot(this).orientation; });
+// Chrome's prototype order: constructor after orientation, then onchange, isExtended.
+delete Screen.prototype.constructor;
+Object.defineProperty(Screen.prototype, 'constructor', { value: Screen, writable: true, configurable: true });
+_screenHandler(Screen, 'onchange');
+_screenGetter(Screen, 'isExtended', function() { _screenSlot(this); return false; });
+{
+  const d = Object.getOwnPropertyDescriptor(ScreenOrientation.prototype, 'constructor');
+  delete ScreenOrientation.prototype.constructor;
+  Object.defineProperty(ScreenOrientation.prototype, 'constructor', d);
+}
 globalThis.Screen = Screen;
-globalThis.screen = new Screen(1920, 1080);
+globalThis.ScreenOrientation = ScreenOrientation;
+globalThis.screen = new Screen(_screenToken, 1920, 1080);
 function _applyScreenSize(w, h, emulated) {
   if (globalThis.screen instanceof Screen) {
-    globalThis.screen._w = w;
-    globalThis.screen._h = h;
-    globalThis.screen._availW = w;
-    globalThis.screen._availH = emulated ? h : h - 40;
+    const st = _screenSlot(globalThis.screen);
+    st.w = w; st.h = h; st.availW = w; st.availH = emulated ? h : h - 40;
   } else {
-    globalThis.screen = new Screen(w, h, w, emulated ? h : h - 40);
+    globalThis.screen = new Screen(_screenToken, w, h, w, emulated ? h : h - 40);
   }
 }
 globalThis.__obscura_set_screen_override = function(w, h, emulated) {
@@ -7661,6 +7721,9 @@ function _serializeBody(initBody, headers, synthesizeContentType = true) {
 }
 
 globalThis.fetch = async (input, init = {}) => {
+  const _rtStart = _perfNowInternal();
+  const _rtType = _fetchInitiator || 'fetch';
+  _fetchInitiator = null;
   init = init || {};
   const request = input instanceof Request ? input : null;
   let url = typeof input === "string"
@@ -7721,8 +7784,14 @@ globalThis.fetch = async (input, init = {}) => {
       configurable: true,
     });
   }
+  if (_perfRecordResource) {
+    const ct = parsed.headers ? (parsed.headers['content-type'] || parsed.headers['Content-Type']) : '';
+    _perfRecordResource(parsed.url || url, _rtType, _rtStart, _perfNowInternal(), parsed.status, (parsed.body || '').length, ct);
+  }
   return response;
 };
+// XMLHttpRequest calls this, not the page-visible global (which scripts wrap).
+const _fetchInternal = globalThis.fetch;
 
 if (typeof Headers === "undefined") {
   globalThis.Headers = class Headers {
@@ -7853,7 +7922,8 @@ globalThis.XMLHttpRequest = class XMLHttpRequest extends XMLHttpRequestEventTarg
     // Same rule as fetch: always resolve through the URL parser.
     let url = _resolveUrl(this._url);
 
-    fetch(url, {
+    _fetchInitiator = 'xmlhttprequest';
+    _fetchInternal(url, {
       method: this._method,
       headers: this._headers,
       body: body || undefined,
@@ -10137,7 +10207,7 @@ globalThis.IntersectionObserver = class IntersectionObserver {
       boundingClientRect: _ioRect(rect.x, rect.y, rect.width, rect.height),
       intersectionRect: isIntersecting ? _ioRect(left, top, width, height) : _ioRect(0, 0, 0, 0),
       rootBounds: root,
-      time: performance.now(),
+      time: _perfNowInternal(),
     };
   }
   _thresholdIndex(ratio) {
@@ -10392,7 +10462,7 @@ globalThis.Event = class Event {
     const o = init || {};
     _evSlots.set(this, {
       type: String(type), bubbles: !!o.bubbles, cancelable: !!o.cancelable, composed: !!o.composed,
-      defaultPrevented: false, target: null, currentTarget: null, eventPhase: 0, timeStamp: performance.now(),
+      defaultPrevented: false, target: null, currentTarget: null, eventPhase: 0, timeStamp: _perfNowInternal(),
       _dispatching: false, _propagationStopped: false, _immediatePropagationStopped: false,
     });
     // [LegacyUnforgeable]: an own, non-configurable accessor on each event.
@@ -10464,6 +10534,7 @@ _evInterface(UIEvent, ['view', 'detail', 'sourceCapabilities', 'which', 'initUIE
   } },
 });
 
+function _scrollOffset(prop) { try { const root = _scrollRoot(); return root ? (root[prop] || 0) : 0; } catch (_e) { return 0; } }
 const _modifierState = { value: function getModifierState(key) {
   const s = _evSlot(this);
   switch (String(key)) {
@@ -10492,16 +10563,18 @@ const _offsetOf = (e, axis) => {
 _evInterface(MouseEvent, ['screenX', 'screenY', 'clientX', 'clientY', 'ctrlKey', 'shiftKey', 'altKey', 'metaKey',
   'button', 'buttons', 'relatedTarget', 'pageX', 'pageY', 'x', 'y', 'offsetX', 'offsetY', 'movementX', 'movementY',
   'fromElement', 'toElement', 'layerX', 'layerY', 'getModifierState', 'initMouseEvent', 'constructor'], {
-  pageX() { return _evSlot(this).clientX + (globalThis.scrollX || 0); },
-  pageY() { return _evSlot(this).clientY + (globalThis.scrollY || 0); },
+  // Scroll offsets read internally: a page wrapping window.scrollX must not
+  // see event getters call it.
+  pageX() { return _evSlot(this).clientX + _scrollOffset('scrollLeft'); },
+  pageY() { return _evSlot(this).clientY + _scrollOffset('scrollTop'); },
   x() { return _evSlot(this).clientX; },
   y() { return _evSlot(this).clientY; },
   offsetX() { return _offsetOf(this, 'x'); },
   offsetY() { return _offsetOf(this, 'y'); },
   fromElement() { const s = _evSlot(this); return /over|enter/.test(s.type) ? s.relatedTarget : s.target; },
   toElement() { const s = _evSlot(this); return /out|leave/.test(s.type) ? s.relatedTarget : s.target; },
-  layerX() { return _evSlot(this).clientX + (globalThis.scrollX || 0); },
-  layerY() { return _evSlot(this).clientY + (globalThis.scrollY || 0); },
+  layerX() { return _evSlot(this).clientX + _scrollOffset('scrollLeft'); },
+  layerY() { return _evSlot(this).clientY + _scrollOffset('scrollTop'); },
   getModifierState: _modifierState,
   // Legacy DOM Level 2 initializer, UI Events positional signature.
   initMouseEvent: { value: function initMouseEvent(type, canBubble, cancelable, view, detail, screenX, screenY, clientX, clientY, ctrlKey, altKey, shiftKey, metaKey, button, relatedTarget) {
@@ -16241,6 +16314,11 @@ if (typeof ShadowRoot !== 'undefined' && !ShadowRoot.prototype.elementFromPoint)
 var _perfState = null;
 // Per-document timeline setup, installed by _interfaceFidelity (4b).
 var _perfTimeline = null;
+// Resource Timing: records a PerformanceResourceTiming entry (set by 4b), and
+// the unwrapped clock obscura's own code reads (never the page's performance.now).
+var _perfRecordResource = null;
+// initiatorType for the next internal fetch (XMLHttpRequest goes through fetch).
+var _fetchInitiator = null;
 (function _interfaceFidelity() {
   var def = function(o, k, v) { Object.defineProperty(o, k, { value: v, writable: true, enumerable: false, configurable: true }); };
   var tag = function(P, name) {
@@ -16574,6 +16652,32 @@ var _perfTimeline = null;
       add(make(PNT, nv));
       add(make(VSE, { name: document.visibilityState || 'visible', entryType: 'visibility-state', startTime: 0, duration: 0, navigationId: navId }));
     };
+    // Resource Timing entries for scripts, fetch and XHR. Cross-origin entries
+    // without Timing-Allow-Origin expose only start/end, like Chrome.
+    _perfNowInternal = now;
+    var resourceLimit = 250;
+    _perfRecordResource = function(name, initiatorType, start, end, status, size, contentType) {
+      if (typeof name !== 'string' || !/^https?:/i.test(name)) return;
+      if (ofType(tl, 'resource').length >= resourceLimit) return;
+      var e = end == null ? now() : end;
+      var st = start == null ? Math.max(0, e - (8 + Math.random() * 60)) : start;
+      var same = false;
+      try { same = new URL(name).origin === location.origin; } catch (_e) {}
+      var z = function(v) { return same ? v : 0; };
+      var rs = z(st + (e - st) * 0.85);
+      var bytes = same ? (size | 0) : 0;
+      add(make(PR, { name: name, entryType: 'resource', startTime: st, duration: e - st, navigationId: navId,
+        initiatorType: initiatorType, deliveryType: '', nextHopProtocol: same ? 'h2' : '', renderBlockingStatus: 'non-blocking',
+        contentType: same ? String(contentType || '').split(';')[0] : '', contentEncoding: '', workerStart: 0,
+        workerRouterEvaluationStart: 0, workerCacheLookupStart: 0, workerMatchedSourceType: '', workerFinalSourceType: '',
+        redirectStart: 0, redirectEnd: 0, fetchStart: st, domainLookupStart: z(st), domainLookupEnd: z(st),
+        connectStart: z(st), secureConnectionStart: z(st), connectEnd: z(st), requestStart: z(st + 0.4), responseStart: rs,
+        firstInterimResponseStart: 0, finalResponseHeadersStart: rs, responseEnd: e, transferSize: same ? bytes + 300 : 0,
+        encodedBodySize: bytes, decodedBodySize: bytes, responseStatus: same ? (status | 0) : 0, serverTiming: [] }));
+    };
+    globalThis.__obscura_perfResource = function(name, initiatorType, status, size, contentType) {
+      _perfRecordResource(String(name), String(initiatorType), null, null, status, size, contentType);
+    };
     // A worker realm has no document: no navigation or visibility entries.
     _perfTimeline.reset = function() { tl.length = 0; tv = nv = null; };
     // Document lifecycle stamps from the host.
@@ -16641,7 +16745,7 @@ var _perfTimeline = null;
     method(P, 'clearMarks', clearer('mark'));
     method(P, 'clearMeasures', clearer('measure'));
     method(P, 'clearResourceTimings', clearer('resource'));
-    method(P, 'setResourceTimingBufferSize', function setResourceTimingBufferSize() {});
+    method(P, 'setResourceTimingBufferSize', function setResourceTimingBufferSize(n) { resourceLimit = n >>> 0; });
     method(P, 'toJSON', function toJSON() {
       return { timeOrigin: this.timeOrigin, timing: this.timing.toJSON(), navigation: this.navigation.toJSON() };
     });
@@ -17125,7 +17229,7 @@ globalThis.__obscura_workerInit = function(kind, url, name, toParent) {
       if (arguments.length < 1) throw new TypeError("Failed to execute 'postMessage' on 'DedicatedWorkerGlobalScope': 1 argument required, but only 0 present.");
       if (!closed) toParent.message(clone(message));
     }, 'postMessage'), writable: true, enumerable: true, configurable: true });
-    Object.defineProperty(globalThis, 'requestAnimationFrame', { value: native(function requestAnimationFrame(cb) { return later(() => cb(performance.now()), 16); }, 'requestAnimationFrame'), writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(globalThis, 'requestAnimationFrame', { value: native(function requestAnimationFrame(cb) { return later(() => cb(_perfNowInternal()), 16); }, 'requestAnimationFrame'), writable: true, enumerable: true, configurable: true });
     Object.defineProperty(globalThis, 'cancelAnimationFrame', { value: native(function cancelAnimationFrame(id) { clearTimeout(id); }, 'cancelAnimationFrame'), writable: true, enumerable: true, configurable: true });
   }
   Object.defineProperty(globalThis, 'close', { value: native(function close() { closed = true; if (toParent.close) toParent.close(); }, 'close'), writable: true, enumerable: true, configurable: true });
