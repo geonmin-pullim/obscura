@@ -7223,7 +7223,20 @@ globalThis.navigator = {
   } },
   getBattery() { return Promise.resolve({ charging: _fp('batteryCharging'), chargingTime: _fp('batteryCharging') ? 0 : Infinity, dischargingTime: _fp('batteryCharging') ? Infinity : Math.floor(3600 + _fpRand(250) * 7200), level: _fp('batteryLevel'), addEventListener(){} }); },
   getGamepads() { return []; },
-  sendBeacon() { return true; },
+  // A real POST, as Chrome queues one: credentials included, no response
+  // exposed. Payloads over 64 KiB are refused (Chrome's keepalive quota).
+  sendBeacon(url, data) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'sendBeacon' on 'Navigator': 1 argument required, but only 0 present.");
+    let target;
+    try { target = new URL(String(url), _documentBase() || location.href); } catch (e) { throw new TypeError("Failed to execute 'sendBeacon' on 'Navigator': The URL argument is ill-formed or unsupported."); }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new TypeError("Failed to execute 'sendBeacon' on 'Navigator': Beacons are only supported over HTTP(S).");
+    const size = data == null ? 0 : typeof data === 'string' ? new TextEncoder().encode(data).length
+      : data.byteLength !== undefined ? data.byteLength : data.size !== undefined ? data.size : String(data).length;
+    if (size > 65536) return false;
+    _fetchInitiator = 'beacon';
+    _fetchInternal(target.href, { method: 'POST', body: data == null ? undefined : data, credentials: 'include', mode: 'no-cors', keepalive: true }).catch(() => {});
+    return true;
+  },
   javaEnabled() { return false; },
   geolocation: {
     getCurrentPosition(success, error) {

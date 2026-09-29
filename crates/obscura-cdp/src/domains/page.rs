@@ -1068,6 +1068,8 @@ pub(crate) fn emit_runtime_network_events(
                     "url": network_event.url,
                     "method": network_event.method,
                     "headers": network_event.headers,
+                    "hasPostData": network_event.post_data.is_some(),
+                    "postData": network_event.post_data,
                 },
                 "timestamp": network_event.timestamp,
                 "wallTime": network_event.timestamp,
@@ -1907,6 +1909,7 @@ mod tests {
             )])),
             body_size: 12,
             timestamp: 42.0,
+            post_data: None,
         };
 
         emit_runtime_network_events(

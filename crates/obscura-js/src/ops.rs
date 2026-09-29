@@ -89,6 +89,74 @@ pub struct JsNetworkEvent {
     pub response_headers: HashMap<String, String>,
     pub body_size: usize,
     pub timestamp: f64,
+    /// Request body as text (lossy UTF-8, capped), for CDP `request.postData`.
+    pub post_data: Option<String>,
+}
+
+/// Request body for a network event: lossy UTF-8, at most 64 KiB.
+fn event_post_data(body: &[u8]) -> Option<String> {
+    if body.is_empty() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&body[..body.len().min(64 * 1024)]).into_owned())
+}
+
+/// Record a script-initiated request whose response came back as the JSON
+/// `stealth_fetch_all` returns: store the body under a fetch-{N} id and queue
+/// the network event, like the non-stealth path does (#406).
+fn record_stealth_js_network_event(
+    state: &Rc<RefCell<OpState>>,
+    method: &str,
+    post_data: Option<String>,
+    result: &str,
+) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(result) else { return };
+    let status = v.get("status").and_then(|s| s.as_u64()).unwrap_or(0) as u16;
+    let url = v.get("url").and_then(|s| s.as_str()).unwrap_or_default().to_string();
+    let body = v.get("body").and_then(|s| s.as_str()).unwrap_or_default().to_string();
+    let response_headers: HashMap<String, String> = v
+        .get("headers")
+        .and_then(|h| serde_json::from_value(h.clone()).ok())
+        .unwrap_or_default();
+    let state_borrow = state.borrow();
+    let gs = state_borrow.borrow::<SharedState>().clone();
+    let mut gs = gs.borrow_mut();
+    gs.network_response_body_counter += 1;
+    let request_id = format!("fetch-{}", gs.network_response_body_counter);
+    let max_entries = response_body_entry_limit();
+    let max_bytes = response_body_byte_limit();
+    let body_size = body.len();
+    if max_entries > 0 && max_bytes > 0 && body_size <= max_bytes {
+        gs.network_response_bodies.insert(
+            request_id.clone(),
+            StoredNetworkResponseBody { body, base64_encoded: false },
+        );
+        gs.network_response_body_order.push_back(request_id.clone());
+        while gs.network_response_body_order.len() > max_entries {
+            if let Some(oldest) = gs.network_response_body_order.pop_front() {
+                gs.network_response_bodies.remove(&oldest);
+            }
+        }
+    }
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64();
+    gs.js_network_events.push(JsNetworkEvent {
+        request_id,
+        url,
+        method: method.to_string(),
+        status,
+        response_headers,
+        body_size,
+        timestamp,
+        post_data,
+    });
+    const MAX_JS_NETWORK_EVENTS: usize = 4096;
+    if gs.js_network_events.len() > MAX_JS_NETWORK_EVENTS {
+        let overflow = gs.js_network_events.len() - MAX_JS_NETWORK_EVENTS;
+        gs.js_network_events.drain(0..overflow);
+    }
 }
 
 #[cfg(feature = "render")]
@@ -3505,7 +3573,7 @@ async fn op_fetch_url(
             (gs.stealth_client.clone(), gs.url.clone())
         };
         if let (Some(stealth), document_url) = stealth {
-            return stealth_fetch_all(
+            let result = stealth_fetch_all(
                 stealth,
                 document_url,
                 url.clone(),
@@ -3521,6 +3589,12 @@ async fn op_fetch_url(
                 destination,
             )
             .await;
+            // The stealth transport returns early; record the request here so
+            // CDP clients see it too.
+            if let Ok(ref json) = result {
+                record_stealth_js_network_event(&state, req_method.as_str(), event_post_data(&body), json);
+            }
+            return result;
         }
     }
 
@@ -3530,6 +3604,7 @@ async fn op_fetch_url(
     // (GHSA-8v6v-g4rh-jmcm).
     let mut current_url = url.clone();
     let mut current_method = req_method;
+    let request_post_data = event_post_data(&body);
     let mut current_body = body;
     // A mutable copy applied per hop: credential headers are dropped when a
     // redirect crosses origin, and body headers when the method downgrades.
@@ -3815,6 +3890,7 @@ async fn op_fetch_url(
             response_headers: resp_headers.clone(),
             body_size: resp_bytes.len(),
             timestamp,
+            post_data: request_post_data,
         });
         const MAX_JS_NETWORK_EVENTS: usize = 4096;
         if gs.js_network_events.len() > MAX_JS_NETWORK_EVENTS {

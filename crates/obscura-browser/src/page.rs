@@ -193,6 +193,8 @@ pub struct NetworkEvent {
     pub response_headers: Arc<std::collections::HashMap<String, String>>,
     pub body_size: usize,
     pub timestamp: f64,
+    /// Request body text for script-initiated requests (CDP `postData`).
+    pub post_data: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -4260,6 +4262,7 @@ impl Page {
                 response_headers: Arc::new(ev.response_headers),
                 body_size: ev.body_size,
                 timestamp: ev.timestamp,
+                post_data: ev.post_data,
             });
         }
     }
@@ -4556,6 +4559,7 @@ impl Page {
             response_headers: Arc::new(response_headers.clone()),
             body_size,
             timestamp,
+            post_data: None,
         });
         request_id
     }
