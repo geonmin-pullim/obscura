@@ -38,7 +38,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
     '__obscura_perfMark', '__obscura_nav', '__obscura_perfResource', '_perfRecordResource', '_perfNowInternal', '_fetchInitiator', '_fetchInternal', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
-    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_ctx2dImpl', '_ctx2dProto', '_ctx2dPub', '_ctx2dPublic', '_CSS_COLORS', '_lateShapes', '_iSetTimeout', '_iQueueMicrotask', '_iStructuredClone', '_iGetAttr', '_iSetAttr', '_iDocQS', '_iCreateElement', '_iGetContext', '_audioRate', '_nativeMethods', '_icall', '_snapshotNativeMethods', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
+    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_xhrSlots', '_xhrToken', '_xhrSlot', '_xhrDefine', '_xhrHandler', '_xhrReorderCtor', '_xhrFire', '_xhrHasListeners', '_xhrState', '_ctx2dImpl', '_ctx2dProto', '_ctx2dPub', '_ctx2dPublic', '_CSS_COLORS', '_lateShapes', '_iSetTimeout', '_iQueueMicrotask', '_iStructuredClone', '_iGetAttr', '_iSetAttr', '_iDocQS', '_iCreateElement', '_iGetContext', '_audioRate', '_nativeMethods', '_icall', '_snapshotNativeMethods', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -7800,261 +7800,249 @@ if (typeof Headers === "undefined") {
   };
 }
 
-// XMLHttpRequestEventTarget — spec-required ancestor for XHR EventTarget methods.
-// zone.js prefers to walk XMLHttpRequestEventTarget.prototype for addEventListener/
-// removeEventListener/dispatchEvent descriptors before falling back to XHR.prototype.
-class XMLHttpRequestEventTarget {
-  addEventListener(type, handler) {
-    if (!this._listeners) this._listeners = {};
-    if (!this._listeners[type]) this._listeners[type] = [];
-    this._listeners[type].push(handler);
+// XMLHttpRequest, XMLHttpRequestEventTarget and XMLHttpRequestUpload as
+// Chrome 154 shapes them: EventTargets whose state lives in a closure WeakMap
+// (instances have no own properties), event handler attributes and state as
+// prototype accessors in Chrome's member order, trusted ProgressEvents fired
+// by the UA through the internal dispatcher. Requests go through the internal
+// fetch (never the page-visible window.fetch).
+const _xhrSlots = new WeakMap();
+const _xhrToken = Symbol('xhr');
+function _xhrSlot(o) { const s = _xhrSlots.get(o); if (!s) throw new TypeError('Illegal invocation'); return s; }
+function _xhrDefine(P, k, desc) {
+  const d = { enumerable: true, configurable: true };
+  if (desc.value) { d.value = _markNativeAs(desc.value, 'function ' + k + '() { [native code] }'); d.writable = true; }
+  else {
+    d.get = _markNativeAs(desc.get, 'function get ' + k + '() { [native code] }');
+    d.set = desc.set ? _markNativeAs(desc.set, 'function set ' + k + '() { [native code] }') : undefined;
   }
-  removeEventListener(type, handler) {
-    if (this._listeners && this._listeners[type]) {
-      this._listeners[type] = this._listeners[type].filter(h => h !== handler);
-    }
-  }
-  dispatchEvent(event) {
-    if (!event || !event.type) return false;
-    const ev = (typeof event === 'object') ? event : { type: event };
-    _evSet(ev, 'target', _evGet(ev, 'target') || this);
-    _evSet(ev, 'currentTarget', _evGet(ev, 'currentTarget') || this);
-    const type = ev.type;
-    const handlers = (this._listeners && this._listeners[type]) || [];
-    for (const h of handlers) { try { h.call(this, ev); } catch (e) {} }
-    const prop = 'on' + type;
-    if (typeof this[prop] === 'function') {
-      try { this[prop](ev); } catch (e) {}
-    }
-    return true;
+  Object.defineProperty(P, k, d);
+}
+function _xhrHandler(P, k) {
+  _xhrDefine(P, k, {
+    get() { return _xhrSlot(this).handlers[k] || null; },
+    set(v) { _xhrSlot(this).handlers[k] = typeof v === 'function' ? v : null; },
+  });
+}
+function _xhrReorderCtor(C) {
+  const d = Object.getOwnPropertyDescriptor(C.prototype, 'constructor');
+  delete C.prototype.constructor;
+  Object.defineProperty(C.prototype, 'constructor', d);
+}
+class XMLHttpRequestEventTarget extends EventTarget {
+  constructor(token) {
+    if (token !== _xhrToken) throw new TypeError("Failed to construct '" + new.target.name + "': Illegal constructor");
+    super();
   }
 }
-globalThis.XMLHttpRequestEventTarget = XMLHttpRequestEventTarget;
-_markNative(XMLHttpRequestEventTarget);
-_markNative(XMLHttpRequestEventTarget.prototype.addEventListener);
-_markNative(XMLHttpRequestEventTarget.prototype.removeEventListener);
-_markNative(XMLHttpRequestEventTarget.prototype.dispatchEvent);
-
-globalThis.XMLHttpRequest = class XMLHttpRequest extends XMLHttpRequestEventTarget {
-  static UNSENT = 0;
-  static OPENED = 1;
-  static HEADERS_RECEIVED = 2;
-  static LOADING = 3;
-  static DONE = 4;
-  UNSENT = 0; OPENED = 1; HEADERS_RECEIVED = 2; LOADING = 3; DONE = 4;
-
+['onloadstart', 'onprogress', 'onabort', 'onerror', 'onload', 'ontimeout', 'onloadend'].forEach((k) => _xhrHandler(XMLHttpRequestEventTarget.prototype, k));
+_xhrReorderCtor(XMLHttpRequestEventTarget);
+class XMLHttpRequestUpload extends XMLHttpRequestEventTarget {
+  constructor(token) {
+    super(token);
+    _xhrSlots.set(this, { handlers: {} });
+  }
+}
+// Fire a UA event: the on<type> handler, then listeners, never through the
+// page-visible dispatchEvent.
+// total < 0: length unknown (Chrome reports lengthComputable false and total
+// 0 for encoded responses, whose decoded size is not the Content-Length).
+function _xhrFire(target, type, loaded, total) {
+  const ev = type === 'readystatechange'
+    ? new Event(type)
+    : new ProgressEvent(type, { lengthComputable: total > 0, loaded: loaded || 0, total: total > 0 ? total : 0 });
+  globalThis.__obscura_markTrusted(ev);
+  const h = _xhrSlot(target).handlers['on' + type];
+  if (h) { try { h.call(target, ev); } catch (e) { console.error(e); } }
+  _eventTargetDispatch(target, ev);
+}
+function _xhrHasListeners(target) {
+  const s = _xhrSlot(target);
+  if (Object.keys(s.handlers).some((k) => s.handlers[k])) return true;
+  const m = _eventTargetListeners.get(target);
+  return !!(m && Array.from(m.values()).some((l) => l && l.length));
+}
+function _xhrState(xhr, state) {
+  _xhrSlot(xhr).readyState = state;
+  _xhrFire(xhr, 'readystatechange');
+}
+class XMLHttpRequest extends XMLHttpRequestEventTarget {
   constructor() {
-    super();
-    this.readyState = 0;
-    this.status = 0;
-    this.statusText = "";
-    this.responseText = "";
-    this.responseXML = null;
-    this.responseURL = "";
-    this.responseType = "";
-    this.response = null;
-    this.timeout = 0;
-    this.withCredentials = false;
-    this.upload = { addEventListener(){}, removeEventListener(){} };
-    this._method = "GET";
-    this._url = "";
-    this._headers = {};
-    this._responseHeaders = {};
-    this._aborted = false;
-    this._listeners = {};
-    this.onreadystatechange = null;
-    this.onload = null;
-    this.onerror = null;
-    this.onabort = null;
-    this.onprogress = null;
-    this.ontimeout = null;
-    this.onloadstart = null;
-    this.onloadend = null;
-  }
-
-  open(method, url, async_) {
-    this._method = method;
-    this._url = url;
-    this._headers = {};
-    this._responseHeaders = {};
-    this._aborted = false;
-    this.status = 0;
-    this.statusText = "";
-    this.responseText = "";
-    this.response = null;
-    this._setReadyState(1);
-  }
-
-  setRequestHeader(name, value) {
-    this._headers[name] = value;
-  }
-
-  getResponseHeader(name) {
-    const lower = name.toLowerCase();
-    for (const [k, v] of Object.entries(this._responseHeaders)) {
-      if (k.toLowerCase() === lower) return v;
-    }
-    return null;
-  }
-
-  getAllResponseHeaders() {
-    return Object.entries(this._responseHeaders)
-      .map(([k, v]) => k + ': ' + v)
-      .join('\r\n');
-  }
-
-  overrideMimeType(mime) { this._overrideMime = mime; }
-
-  send(body) {
-    if (this.readyState !== 1) return;
-    if (this._aborted) return;
-
-    const xhr = this;
-    this._fireEvent('loadstart');
-
-    // Same rule as fetch: always resolve through the URL parser.
-    let url = _resolveUrl(this._url);
-
-    _fetchInitiator = 'xmlhttprequest';
-    _fetchInternal(url, {
-      method: this._method,
-      headers: this._headers,
-      body: body || undefined,
-      mode: 'cors',
-      credentials: this.withCredentials ? 'include' : 'same-origin',
-    }).then(async (resp) => {
-      if (xhr._aborted) return;
-
-      xhr.status = resp.status;
-      xhr.statusText = resp.statusText || '';
-      xhr.responseURL = resp.url || url;
-
-      if (resp.headers) {
-        resp.headers.forEach((v, k) => { xhr._responseHeaders[k] = v; });
-      }
-
-      xhr._setReadyState(2); // HEADERS_RECEIVED
-
-      // Read the body as bytes, ALWAYS. Going through resp.text() and then
-      // TextEncoder().encode() for the binary responseTypes is not a
-      // round-trip: the decode is lossy for anything that is not valid UTF-8,
-      // so bytes >= 0x80 come back re-encoded as the UTF-8 of whatever code
-      // point they decoded to, and the length changes with the content.
-      // Emscripten loaders fetch .wasm and data files this way, so they saw
-      // corrupted assets while fetch() was byte-correct.
-      const buffer = await resp.arrayBuffer();
-      if (xhr._aborted) return;
-
-      const wantsText = xhr.responseType === '' || xhr.responseType === 'text'
-                     || xhr.responseType === 'json' || xhr.responseType === 'document';
-      // Decoding a multi-megabyte binary body into a string nobody reads is
-      // pure waste, and responseText is not defined for the binary types.
-      const text = wantsText ? new TextDecoder().decode(buffer) : '';
-
-      xhr.responseText = text;
-      xhr._setReadyState(3); // LOADING
-
-      switch (xhr.responseType) {
-        case 'json':
-          try { xhr.response = JSON.parse(text); } catch(e) { xhr.response = null; }
-          break;
-        case 'text':
-        case '':
-          xhr.response = text;
-          break;
-        case 'arraybuffer':
-          xhr.response = buffer;
-          break;
-        case 'blob':
-          xhr.response = new Blob([buffer]);
-          break;
-        case 'document':
-          xhr.response = text; // simplified
-          break;
-        default:
-          xhr.response = text;
-      }
-
-      xhr._setReadyState(4); // DONE
-      xhr._fireEvent('load');
-      xhr._fireEvent('loadend');
-    }).catch((err) => {
-      if (xhr._aborted) return;
-      xhr.status = 0;
-      xhr.readyState = 4;
-      xhr._fireEvent('readystatechange');
-      xhr._fireEvent('error');
-      xhr._fireEvent('loadend');
-      if (xhr.onerror) xhr.onerror(err);
+    super(_xhrToken);
+    _xhrSlots.set(this, {
+      handlers: {}, readyState: 0, status: 0, statusText: '', responseURL: '', responseType: '',
+      timeout: 0, withCredentials: false, upload: new XMLHttpRequestUpload(_xhrToken),
+      method: 'GET', url: '', headers: {}, responseHeaders: [], body: null, text: '', response: null,
+      sent: false, gen: 0, overrideMime: null,
     });
   }
-
-  abort() {
-    this._aborted = true;
-    if (this.readyState > 0 && this.readyState < 4) {
-      this._setReadyState(4);
-      this._fireEvent('abort');
-      this._fireEvent('loadend');
+}
+{
+  const P = XMLHttpRequest.prototype;
+  const S = (o) => _xhrSlot(o);
+  const invalid = (what) => new DOMException("Failed to execute '" + what + "' on 'XMLHttpRequest': The object's state must be OPENED.", 'InvalidStateError');
+  _xhrHandler(P, 'onreadystatechange');
+  _xhrDefine(P, 'readyState', { get() { return S(this).readyState; } });
+  _xhrDefine(P, 'timeout', { get() { return S(this).timeout; }, set(v) { S(this).timeout = Math.max(0, v >>> 0); } });
+  _xhrDefine(P, 'withCredentials', { get() { return S(this).withCredentials; }, set(v) { S(this).withCredentials = !!v; } });
+  _xhrDefine(P, 'upload', { get() { return S(this).upload; } });
+  _xhrDefine(P, 'responseURL', { get() { return S(this).responseURL; } });
+  _xhrDefine(P, 'status', { get() { return S(this).status; } });
+  _xhrDefine(P, 'statusText', { get() { return S(this).statusText; } });
+  _xhrDefine(P, 'responseType', {
+    get() { return S(this).responseType; },
+    set(v) {
+      const s = S(this);
+      if (s.readyState >= 3) throw new DOMException("Failed to set the 'responseType' property on 'XMLHttpRequest': The response type cannot be set if the object's state is LOADING or DONE.", 'InvalidStateError');
+      if (['', 'arraybuffer', 'blob', 'document', 'json', 'text'].indexOf(String(v)) >= 0) s.responseType = String(v);
+    },
+  });
+  _xhrDefine(P, 'response', {
+    get() {
+      const s = S(this);
+      if (s.responseType === '' || s.responseType === 'text') return s.readyState >= 3 ? s.text : '';
+      return s.readyState === 4 ? s.response : null;
+    },
+  });
+  _xhrDefine(P, 'responseText', {
+    get() {
+      const s = S(this);
+      if (s.responseType !== '' && s.responseType !== 'text') {
+        throw new DOMException("Failed to read the 'responseText' property from 'XMLHttpRequest': The value is only accessible if the object's 'responseType' is '' or 'text' (was '" + s.responseType + "').", 'InvalidStateError');
+      }
+      return s.readyState >= 3 ? s.text : '';
+    },
+  });
+  ['UNSENT', 'OPENED', 'HEADERS_RECEIVED', 'LOADING', 'DONE'].forEach((k, i) => {
+    Object.defineProperty(P, k, { value: i, writable: false, enumerable: true, configurable: false });
+    Object.defineProperty(XMLHttpRequest, k, { value: i, writable: false, enumerable: true, configurable: false });
+  });
+  _xhrDefine(P, 'abort', { value: function abort() {
+    const s = S(this);
+    s.gen++;
+    if (s.sent && s.readyState > 0 && s.readyState < 4) {
+      s.sent = false;
+      _xhrState(this, 4);
+      _xhrFire(this, 'abort');
+      _xhrFire(this, 'loadend');
     }
-    this.readyState = 0;
-  }
-
-  addEventListener(type, handler) {
-    if (!this._listeners[type]) this._listeners[type] = [];
-    this._listeners[type].push(handler);
-  }
-
-  removeEventListener(type, handler) {
-    if (this._listeners[type]) {
-      this._listeners[type] = this._listeners[type].filter(h => h !== handler);
+    if (s.readyState === 4) s.readyState = 0;
+  } });
+  _xhrDefine(P, 'getAllResponseHeaders', { value: function getAllResponseHeaders() {
+    const s = S(this);
+    if (s.readyState < 2) return '';
+    return s.responseHeaders.map(([k, v]) => k.toLowerCase() + ': ' + v + '\r\n').join('');
+  } });
+  _xhrDefine(P, 'getResponseHeader', { value: function getResponseHeader(name) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'getResponseHeader' on 'XMLHttpRequest': 1 argument required, but only 0 present.");
+    const s = S(this);
+    if (s.readyState < 2) return null;
+    const lower = String(name).toLowerCase();
+    const vals = s.responseHeaders.filter(([k]) => k.toLowerCase() === lower).map(([, v]) => v);
+    return vals.length ? vals.join(', ') : null;
+  } });
+  _xhrDefine(P, 'open', { value: function open(method, url) {
+    if (arguments.length < 2) throw new TypeError("Failed to execute 'open' on 'XMLHttpRequest': 2 arguments required, but only " + arguments.length + " present.");
+    const s = S(this);
+    s.gen++;
+    const m = String(method);
+    s.method = /^(get|post|put|delete|head|options|patch)$/i.test(m) ? m.toUpperCase() : m;
+    s.url = String(url);
+    s.headers = {}; s.responseHeaders = []; s.sent = false;
+    s.status = 0; s.statusText = ''; s.text = ''; s.response = null; s.responseURL = '';
+    if (s.readyState !== 1) _xhrState(this, 1);
+  } });
+  _xhrDefine(P, 'overrideMimeType', { value: function overrideMimeType(mime) { S(this).overrideMime = String(mime); } });
+  _xhrDefine(P, 'send', { value: function send(body) {
+    const xhr = this, s = S(this);
+    if (s.readyState !== 1 || s.sent) throw invalid('send');
+    s.sent = true;
+    const gen = s.gen;
+    const hasBody = body !== undefined && body !== null && s.method !== 'GET' && s.method !== 'HEAD';
+    const uploadWatched = hasBody && _xhrHasListeners(s.upload);
+    _xhrFire(xhr, 'loadstart');
+    if (uploadWatched) _xhrFire(s.upload, 'loadstart');
+    const url = _resolveUrl(s.url);
+    let timer = null;
+    if (s.timeout > 0) {
+      timer = (_iSetTimeout || setTimeout)(() => {
+        if (s.gen !== gen) return;
+        s.gen++; s.sent = false;
+        _xhrState(xhr, 4);
+        _xhrFire(xhr, 'timeout');
+        _xhrFire(xhr, 'loadend');
+      }, s.timeout);
     }
-  }
-
-  // Per WHATWG DOM spec — required by zone.js which patches XHR via
-  // Object.getOwnPropertyDescriptor on XMLHttpRequestEventTarget.prototype.
-  dispatchEvent(event) {
-    if (!event || !event.type) return false;
-    const ev = (typeof event === 'object') ? event : { type: event };
-    _evSet(ev, 'target', _evGet(ev, 'target') || this);
-    _evSet(ev, 'currentTarget', _evGet(ev, 'currentTarget') || this);
-    const type = ev.type;
-    const handlers = (this._listeners && this._listeners[type]) || [];
-    for (const h of handlers) { try { h.call(this, ev); } catch (e) {} }
-    const prop = 'on' + type;
-    if (typeof this[prop] === 'function') {
-      try { this[prop](ev); } catch (e) {}
+    _fetchInitiator = 'xmlhttprequest';
+    _fetchInternal(url, {
+      method: s.method, headers: s.headers, body: hasBody ? body : undefined, mode: 'cors',
+      credentials: s.withCredentials ? 'include' : 'same-origin',
+    }).then(async (resp) => {
+      if (s.gen !== gen) return;
+      if (uploadWatched) { _xhrFire(s.upload, 'progress', 1, 1); _xhrFire(s.upload, 'load', 1, 1); _xhrFire(s.upload, 'loadend', 1, 1); }
+      s.status = resp.status;
+      s.statusText = resp.statusText || '';
+      s.responseURL = resp.url || url;
+      s.responseHeaders = [];
+      if (resp.headers) resp.headers.forEach((v, k) => { s.responseHeaders.push([k, v]); });
+      _xhrState(xhr, 2);
+      // Bytes first, always: decoding binary bodies through text is lossy.
+      const buffer = await resp.arrayBuffer();
+      if (s.gen !== gen) return;
+      const rt = s.responseType;
+      s.text = (rt === '' || rt === 'text' || rt === 'json' || rt === 'document') ? new TextDecoder().decode(buffer) : '';
+      const loaded = buffer.byteLength;
+      const encoded = resp.headers && resp.headers.get('content-encoding');
+      const declared = resp.headers && +resp.headers.get('content-length');
+      const total = !encoded && declared > 0 ? declared : -1;
+      _xhrState(xhr, 3);
+      _xhrFire(xhr, 'progress', loaded, total);
+      if (rt === 'json') { try { s.response = JSON.parse(s.text); } catch (e) { s.response = null; } }
+      else if (rt === 'arraybuffer') s.response = buffer;
+      else if (rt === 'blob') s.response = new Blob([buffer], { type: s.overrideMime || (resp.headers && resp.headers.get('content-type')) || '' });
+      else if (rt === 'document') { try { s.response = new DOMParser().parseFromString(s.text, 'text/html'); } catch (e) { s.response = null; } }
+      else s.response = s.text;
+      if (timer) clearTimeout(timer);
+      s.sent = false;
+      _xhrState(xhr, 4);
+      _xhrFire(xhr, 'load', loaded, total);
+      _xhrFire(xhr, 'loadend', loaded, total);
+    }).catch(() => {
+      if (s.gen !== gen) return;
+      if (timer) clearTimeout(timer);
+      s.gen++; s.sent = false; s.status = 0;
+      _xhrState(xhr, 4);
+      _xhrFire(xhr, 'error');
+      _xhrFire(xhr, 'loadend');
+    });
+  } });
+  _xhrDefine(P, 'setRequestHeader', { value: function setRequestHeader(name, value) {
+    if (arguments.length < 2) throw new TypeError("Failed to execute 'setRequestHeader' on 'XMLHttpRequest': 2 arguments required, but only " + arguments.length + " present.");
+    const s = S(this);
+    if (s.readyState !== 1 || s.sent) throw invalid('setRequestHeader');
+    const k = String(name), v = String(value);
+    const existing = Object.keys(s.headers).find((h) => h.toLowerCase() === k.toLowerCase());
+    if (existing) s.headers[existing] += ', ' + v; else s.headers[k] = v;
+  } });
+  _xhrReorderCtor(XMLHttpRequest);
+  _xhrDefine(P, 'responseXML', { get() {
+    const s = S(this);
+    if (s.responseType !== '' && s.responseType !== 'document') {
+      throw new DOMException("Failed to read the 'responseXML' property from 'XMLHttpRequest': The value is only accessible if the object's 'responseType' is '' or 'document' (was '" + s.responseType + "').", 'InvalidStateError');
     }
-    return true;
-  }
-
-  _setReadyState(state) {
-    this.readyState = state;
-    this._fireEvent('readystatechange');
-    if (this.onreadystatechange) {
-      try { this.onreadystatechange(); } catch(e) {}
-    }
-  }
-
-  _fireEvent(type) {
-    const event = { type, target: this, currentTarget: this, bubbles: false };
-    const handlers = this._listeners[type] || [];
-    for (const h of handlers) { try { h.call(this, event); } catch(e) {} }
-    const prop = 'on' + type;
-    if (type !== 'readystatechange' && typeof this[prop] === 'function') {
-      try { this[prop](event); } catch(e) {}
-    }
-  }
-};
-_markNative(XMLHttpRequest);
-_markNative(XMLHttpRequest.prototype.open);
-_markNative(XMLHttpRequest.prototype.send);
-_markNative(XMLHttpRequest.prototype.abort);
-_markNative(XMLHttpRequest.prototype.setRequestHeader);
-_markNative(XMLHttpRequest.prototype.addEventListener);
-_markNative(XMLHttpRequest.prototype.removeEventListener);
-_markNative(XMLHttpRequest.prototype.dispatchEvent);
-_markNative(XMLHttpRequest.prototype.getResponseHeader);
-_markNative(XMLHttpRequest.prototype.getAllResponseHeaders);
+    return s.responseType === 'document' && s.readyState === 4 ? s.response : null;
+  } });
+  _xhrDefine(P, 'setPrivateToken', { value: function setPrivateToken(token) {} });
+  Object.defineProperty(P.setPrivateToken, 'length', { value: 1 });
+}
+_xhrReorderCtor(XMLHttpRequestUpload);
+Object.defineProperty(XMLHttpRequest.prototype.send, 'length', { value: 0 });
+Object.defineProperty(XMLHttpRequestEventTarget, 'length', { value: 0 });
+Object.defineProperty(XMLHttpRequestUpload, 'length', { value: 0 });
+globalThis.XMLHttpRequestEventTarget = XMLHttpRequestEventTarget;
+globalThis.XMLHttpRequestUpload = XMLHttpRequestUpload;
+globalThis.XMLHttpRequest = XMLHttpRequest;
+[XMLHttpRequestEventTarget, XMLHttpRequestUpload, XMLHttpRequest].forEach(_markNative);
 
 // WHATWG URL parsing/serialization is delegated to the Rust `url` crate via
 // op_url_parse / op_url_set. The op returns the full component set as JSON; the
