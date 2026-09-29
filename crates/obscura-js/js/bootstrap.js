@@ -38,7 +38,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
     '_hoistMembers', '_perfState', '_perfTimeline', '_chromeFullVersion',
     '__obscura_perfMark', '__obscura_nav', '__obscura_perfResource', '_perfRecordResource', '_perfNowInternal', '_fetchInitiator', '_fetchInternal', '__obscura_workerInit', '__obscura_workerRealm', '_WORKER_GLOBALS',
-    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_lateShapes', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
+    '_offscreenDoc', '_handlerSlots', '_evSlots', '_evSlot', '_evSet', '_evGet', '_evInit', '_evInterface', '_evTrustedGetter', '_modifierState', '_mouseFields', '_offsetOf', '_scrollOffset', '_ctx2dImpl', '_ctx2dProto', '_ctx2dPub', '_ctx2dPublic', '_CSS_COLORS', '_lateShapes', '_pluginState', '_pluginToken', '_pluginSlot', '_pluginIface', '_itemAt', '_namedItem', '_pluginList', '_PDF_MIMES', '_makeMimeType', '_makePlugin', '_makePluginArrays', '_screenState', '_screenToken', '_screenSlot', '_screenGetter', '_screenHandler', '_voicesState', '_voiceObjects', '_voiceMaker', '_voiceList', '_SYSTEM_VOICES', '_workerSlots', '_workerSource', '_workerHref', '_workerHandlers', '_workerFire', '_workerToParent',
     '_fpCache', '_getFp', '_fp', '_splitAsciiWhitespace',
     '_getElementsByClassName', '_docEncoding', '_docIsUtf8',
     '_isSpecialScheme', '_applyDocQueryEncoding', '_anchorBase',
@@ -13587,6 +13587,22 @@ globalThis.__ariaQuerySelector = function(root, selector) { return null; };
 globalThis.__ariaQuerySelectorAll = async function*(root, selector) { /* yields nothing */ };
 const _MAX_CANVAS_DIMENSION = 32767;
 const _MAX_CANVAS_PIXELS = 67108864;
+// CSS named colors (148, as Chrome resolves them).
+const _CSS_COLORS = {"aliceblue":"#f0f8ff","antiquewhite":"#faebd7","aqua":"#00ffff","aquamarine":"#7fffd4","azure":"#f0ffff","beige":"#f5f5dc","bisque":"#ffe4c4","black":"#000000","blanchedalmond":"#ffebcd","blue":"#0000ff","blueviolet":"#8a2be2","brown":"#a52a2a","burlywood":"#deb887","cadetblue":"#5f9ea0","chartreuse":"#7fff00","chocolate":"#d2691e","coral":"#ff7f50","cornflowerblue":"#6495ed","cornsilk":"#fff8dc","crimson":"#dc143c","cyan":"#00ffff","darkblue":"#00008b","darkcyan":"#008b8b","darkgoldenrod":"#b8860b","darkgray":"#a9a9a9","darkgreen":"#006400","darkgrey":"#a9a9a9","darkkhaki":"#bdb76b","darkmagenta":"#8b008b","darkolivegreen":"#556b2f","darkorange":"#ff8c00","darkorchid":"#9932cc","darkred":"#8b0000","darksalmon":"#e9967a","darkseagreen":"#8fbc8f","darkslateblue":"#483d8b","darkslategray":"#2f4f4f","darkslategrey":"#2f4f4f","darkturquoise":"#00ced1","darkviolet":"#9400d3","deeppink":"#ff1493","deepskyblue":"#00bfff","dimgray":"#696969","dimgrey":"#696969","dodgerblue":"#1e90ff","firebrick":"#b22222","floralwhite":"#fffaf0","forestgreen":"#228b22","fuchsia":"#ff00ff","gainsboro":"#dcdcdc","ghostwhite":"#f8f8ff","gold":"#ffd700","goldenrod":"#daa520","gray":"#808080","green":"#008000","greenyellow":"#adff2f","grey":"#808080","honeydew":"#f0fff0","hotpink":"#ff69b4","indianred":"#cd5c5c","indigo":"#4b0082","ivory":"#fffff0","khaki":"#f0e68c","lavender":"#e6e6fa","lavenderblush":"#fff0f5","lawngreen":"#7cfc00","lemonchiffon":"#fffacd","lightblue":"#add8e6","lightcoral":"#f08080","lightcyan":"#e0ffff","lightgoldenrodyellow":"#fafad2","lightgray":"#d3d3d3","lightgreen":"#90ee90","lightgrey":"#d3d3d3","lightpink":"#ffb6c1","lightsalmon":"#ffa07a","lightseagreen":"#20b2aa","lightskyblue":"#87cefa","lightslategray":"#778899","lightslategrey":"#778899","lightsteelblue":"#b0c4de","lightyellow":"#ffffe0","lime":"#00ff00","limegreen":"#32cd32","linen":"#faf0e6","magenta":"#ff00ff","maroon":"#800000","mediumaquamarine":"#66cdaa","mediumblue":"#0000cd","mediumorchid":"#ba55d3","mediumpurple":"#9370db","mediumseagreen":"#3cb371","mediumslateblue":"#7b68ee","mediumspringgreen":"#00fa9a","mediumturquoise":"#48d1cc","mediumvioletred":"#c71585","midnightblue":"#191970","mintcream":"#f5fffa","mistyrose":"#ffe4e1","moccasin":"#ffe4b5","navajowhite":"#ffdead","navy":"#000080","oldlace":"#fdf5e6","olive":"#808000","olivedrab":"#6b8e23","orange":"#ffa500","orangered":"#ff4500","orchid":"#da70d6","palegoldenrod":"#eee8aa","palegreen":"#98fb98","paleturquoise":"#afeeee","palevioletred":"#db7093","papayawhip":"#ffefd5","peachpuff":"#ffdab9","peru":"#cd853f","pink":"#ffc0cb","plum":"#dda0dd","powderblue":"#b0e0e6","purple":"#800080","rebeccapurple":"#663399","red":"#ff0000","rosybrown":"#bc8f8f","royalblue":"#4169e1","saddlebrown":"#8b4513","salmon":"#fa8072","sandybrown":"#f4a460","seagreen":"#2e8b57","seashell":"#fff5ee","sienna":"#a0522d","silver":"#c0c0c0","skyblue":"#87ceeb","slateblue":"#6a5acd","slategray":"#708090","slategrey":"#708090","snow":"#fffafa","springgreen":"#00ff7f","steelblue":"#4682b4","tan":"#d2b48c","teal":"#008080","thistle":"#d8bfd8","tomato":"#ff6347","turquoise":"#40e0d0","violet":"#ee82ee","wheat":"#f5deb3","white":"#ffffff","whitesmoke":"#f5f5f5","yellow":"#ffff00","yellowgreen":"#9acd32"};
+// Public 2D context objects (no own state) for each internal _Canvas2D.
+const _ctx2dImpl = new WeakMap();
+var _ctx2dProto = null;
+const _ctx2dPub = new WeakMap();
+function _ctx2dPublic(impl) {
+  let pub = _ctx2dPub.get(impl);
+  if (!pub) {
+    // Captured at bootstrap: a worker realm drops the global.
+    pub = Object.create(_ctx2dProto || CanvasRenderingContext2D.prototype);
+    _ctx2dImpl.set(pub, impl);
+    _ctx2dPub.set(impl, pub);
+  }
+  return pub;
+}
 class _Canvas2D {
   constructor(canvas) {
     this.canvas = canvas;
@@ -13655,7 +13671,10 @@ class _Canvas2D {
     }
     const m = css.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
     if (m) return [+m[1],+m[2],+m[3],m[4]!==undefined?Math.round(+m[4]*255):255];
-    const named = {red:[255,0,0,255],green:[0,128,0,255],blue:[0,0,255,255],white:[255,255,255,255],black:[0,0,0,255],yellow:[255,255,0,255],orange:[255,165,0,255],gray:[128,128,128,255],transparent:[0,0,0,0]};
+    const lower = css.trim().toLowerCase();
+    if (lower === 'transparent') return [0,0,0,0];
+    if (Object.prototype.hasOwnProperty.call(_CSS_COLORS, lower)) { const h = _CSS_COLORS[lower]; return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16), 255]; }
+    const named = {};
     return named[css] || [0,0,0,255];
   }
   _setPixel(x, y, r, g, b, a) {
@@ -13873,13 +13892,13 @@ HTMLCanvasElement.prototype.getContext = function getContext(type) {
   if (type === '2d') {
     if (this._gl) return null;
     if (!this._ctx) {
-      try {
-        this._ctx = new _Canvas2D(this);
-        if (typeof CanvasRenderingContext2D === 'function') Object.setPrototypeOf(this._ctx, CanvasRenderingContext2D.prototype);
-      }
+      try { this._ctx = new _Canvas2D(this); }
       catch (_error) { return null; }
     }
-    return this._ctx;
+    // Page script gets a state-less CanvasRenderingContext2D; the drawing
+    // state stays on the internal _Canvas2D (this._ctx), which obscura's own
+    // code (toDataURL, drawImage, paint) keeps using.
+    return _ctx2dPublic(this._ctx);
   }
   if (type === 'webgl' || type === 'experimental-webgl' || type === 'webgl2') {
     // Context creation is allowed to fail, and that is the only truthful
@@ -13901,7 +13920,8 @@ HTMLCanvasElement.prototype.getContext = function getContext(type) {
   return null;
 };
 HTMLCanvasElement.prototype.toDataURL = function toDataURL(type, quality) {
-  const ctx = this._ctx || this.getContext('2d');
+  if (!this._ctx) this.getContext('2d');
+  const ctx = this._ctx;
   if (!ctx || !ctx._buf || ctx._w === 0 || ctx._h === 0) return 'data:,';
   const b = ctx._buf;
   return __obscuraCore.ops.op_encode_image(String(type || 'image/png'), ctx._w, ctx._h,
@@ -16834,8 +16854,92 @@ var _fetchInitiator = null;
     }, 'function getBoundingClientRect() { [native code] }'));
   });
 
-  // 6. The 2D context's methods live on CanvasRenderingContext2D.prototype;
-  //    getContext re-parents each context onto it.
+  // 6. The 2D context's methods live on CanvasRenderingContext2D.prototype
+  //    (first copied here so the passes below can wrap them), then rebuilt at
+  //    the end of bootstrap to Chrome 154's 74 members, delegating to the
+  //    internal _Canvas2D; the public object has no own properties.
+  _lateShapes.push(function _ctx2dChromeShape() {
+    _ctx2dProto = CanvasRenderingContext2D.prototype;
+    var REF = [["canvas","get","[object HTMLCanvasElement]"],["lang","getset","inherit"],["font","getset","10px sans-serif"],["textAlign","getset","start"],["textBaseline","getset","alphabetic"],["direction","getset","ltr"],["fontKerning","getset","auto"],["fontStretch","getset","normal"],["fontVariantCaps","getset","normal"],["letterSpacing","getset","0px"],["textRendering","getset","auto"],["wordSpacing","getset","0px"],["globalCompositeOperation","getset","source-over"],["filter","getset","none"],["imageSmoothingQuality","getset","low"],["strokeStyle","getset","#000000"],["fillStyle","getset","#000000"],["shadowColor","getset","rgba(0, 0, 0, 0)"],["lineCap","getset","butt"],["lineJoin","getset","miter"],["globalAlpha","getset",1],["imageSmoothingEnabled","getset",true],["shadowOffsetX","getset",0],["shadowOffsetY","getset",0],["shadowBlur","getset",0],["lineWidth","getset",1],["miterLimit","getset",10],["lineDashOffset","getset",0],["clip","fn",0],["createConicGradient","fn",3],["createImageData","fn",1],["createLinearGradient","fn",4],["createPattern","fn",2],["createRadialGradient","fn",6],["drawFocusIfNeeded","fn",1],["drawImage","fn",3],["fill","fn",0],["fillText","fn",3],["getContextAttributes","fn",0],["getImageData","fn",4],["getLineDash","fn",0],["getTransform","fn",0],["isContextLost","fn",0],["isPointInPath","fn",2],["isPointInStroke","fn",2],["measureText","fn",1],["reset","fn",0],["roundRect","fn",4],["setLineDash","fn",1],["strokeText","fn",3],["arc","fn",5],["arcTo","fn",5],["beginPath","fn",0],["bezierCurveTo","fn",6],["clearRect","fn",4],["closePath","fn",0],["ellipse","fn",7],["fillRect","fn",4],["lineTo","fn",2],["moveTo","fn",2],["putImageData","fn",3],["quadraticCurveTo","fn",4],["rect","fn",4],["resetTransform","fn",0],["restore","fn",0],["rotate","fn",1],["save","fn",0],["scale","fn",2],["setTransform","fn",0],["stroke","fn",0],["strokeRect","fn",4],["transform","fn",6],["translate","fn",2],["constructor","ctor"]];
+    var P = CanvasRenderingContext2D.prototype;
+    var current = {};
+    Object.getOwnPropertyNames(P).forEach(function(k) { current[k] = Object.getOwnPropertyDescriptor(P, k); delete P[k]; });
+    var implOf = function(o) {
+      var impl = _ctx2dImpl.get(o);
+      if (impl) return impl;
+      if (o instanceof _Canvas2D) return o;
+      throw new TypeError('Illegal invocation');
+    };
+    var colorOf = function(impl, v) {
+      // Chrome keeps the previous value for anything it cannot parse, and
+      // serializes opaque colors as #rrggbb, others as rgba(r, g, b, a) with
+      // the alpha as written.
+      var str = String(v).trim(), lower = str.toLowerCase(), alpha = null;
+      var hex = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(str);
+      var fn = /^rgba?\(\s*\d+%?\s*,\s*\d+%?\s*,\s*\d+%?\s*(,\s*([\d.]+%?)\s*)?\)$/i.exec(str);
+      if (!hex && !fn && lower !== 'transparent' && !Object.prototype.hasOwnProperty.call(_CSS_COLORS, lower)) return null;
+      var c = impl._parseColor(str);
+      if (!c) return null;
+      if (fn && fn[2] !== undefined) alpha = fn[2].slice(-1) === '%' ? parseFloat(fn[2]) / 100 : +fn[2];
+      else alpha = c[3] / 255;
+      alpha = Math.max(0, Math.min(1, alpha));
+      if (alpha === 1) return '#' + c.slice(0, 3).map(function(x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+      return 'rgba(' + c[0] + ', ' + c[1] + ', ' + c[2] + ', ' + (hex ? +alpha.toFixed(3) : alpha) + ')';
+    };
+    var ENUMS = {
+      lineCap: ['butt', 'round', 'square'], lineJoin: ['bevel', 'round', 'miter'],
+      textAlign: ['start', 'end', 'left', 'right', 'center'],
+      textBaseline: ['top', 'hanging', 'middle', 'alphabetic', 'ideographic', 'bottom'],
+      direction: ['ltr', 'rtl', 'inherit'], imageSmoothingQuality: ['low', 'medium', 'high'],
+      fontKerning: ['auto', 'normal', 'none'], textRendering: ['auto', 'optimizeSpeed', 'optimizeLegibility', 'geometricPrecision'],
+      globalCompositeOperation: ['source-over', 'source-in', 'source-out', 'source-atop', 'destination-over', 'destination-in',
+        'destination-out', 'destination-atop', 'lighter', 'copy', 'xor', 'multiply', 'screen', 'overlay', 'darken', 'lighten',
+        'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'],
+    };
+    var accept = function(impl, k, v) {
+      if (k === 'fillStyle' || k === 'strokeStyle' || k === 'shadowColor') return typeof v === 'object' && v !== null ? v : colorOf(impl, v);
+      if (k === 'lineWidth' || k === 'miterLimit') { v = +v; return isFinite(v) && v > 0 ? v : null; }
+      if (k === 'shadowBlur') { v = +v; return isFinite(v) && v >= 0 ? v : null; }
+      if (k === 'globalAlpha') { v = +v; return isFinite(v) && v >= 0 && v <= 1 ? v : null; }
+      if (k === 'shadowOffsetX' || k === 'shadowOffsetY' || k === 'lineDashOffset') { v = +v; return isFinite(v) ? v : null; }
+      if (k === 'imageSmoothingEnabled') return !!v;
+      if (ENUMS[k]) return ENUMS[k].indexOf(String(v)) >= 0 ? String(v) : null;
+      return String(v);
+    };
+    var OVERRIDE = {
+      getContextAttributes: function() {
+        return { alpha: true, colorSpace: 'srgb', colorType: 'unorm8', desynchronized: false, toneMapping: { mode: 'standard' }, willReadFrequently: false };
+      },
+    };
+    var FALLBACK = {
+      isContextLost: function() { return false; },
+      reset: function() { this._resetDrawingState(); if (this._buf) this._buf.fill(0); },
+      drawFocusIfNeeded: function() {},
+      getTransform: function() { return typeof DOMMatrix === 'function' ? new DOMMatrix() : { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }; },
+      rotate: function() {}, scale: function() {}, transform: function() {}, resetTransform: function() {},
+    };
+    REF.forEach(function(m) {
+      var k = m[0], kind = m[1];
+      if (kind === 'ctor') { Object.defineProperty(P, k, { value: CanvasRenderingContext2D, writable: true, configurable: true }); return; }
+      if (kind === 'fn') {
+        var src = OVERRIDE[k] || (current[k] && current[k].value) || _Canvas2D.prototype[k] || FALLBACK[k] || function() {};
+        var f = { [k]: function() { return src.apply(implOf(this), arguments); } }[k];
+        Object.defineProperty(f, 'length', { value: m[2], configurable: true });
+        Object.defineProperty(P, k, { value: _markNativeAs(f, 'function ' + k + '() { [native code] }'), writable: true, enumerable: true, configurable: true });
+        return;
+      }
+      if (k === 'canvas') {
+        Object.defineProperty(P, k, { get: _markNativeAs(function() { return implOf(this).canvas; }, 'function get canvas() { [native code] }'), set: undefined, enumerable: true, configurable: true });
+        return;
+      }
+      var dflt = m[2];
+      Object.defineProperty(P, k, {
+        get: _markNativeAs(function() { var impl = implOf(this); return k in impl ? impl[k] : dflt; }, 'function get ' + k + '() { [native code] }'),
+        set: _markNativeAs(function(v) { var impl = implOf(this); var x = accept(impl, k, v); if (x !== null) impl[k] = x; }, 'function set ' + k + '() { [native code] }'),
+        enumerable: true, configurable: true,
+      });
+    });
+  });
   if (typeof _Canvas2D === 'function' && typeof CanvasRenderingContext2D === 'function') {
     Object.getOwnPropertyNames(_Canvas2D.prototype).forEach(function(k) {
       if (k === 'constructor' || Object.prototype.hasOwnProperty.call(CanvasRenderingContext2D.prototype, k)) return;
