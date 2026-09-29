@@ -16659,7 +16659,7 @@ mod tests {
     // `('oninput' in document)`. If the GlobalEventHandlers on* attributes are
     // only on window (not Document/Element), that check fails and React falls
     // back to a legacy change-detection path, so controlled-input onChange never
-    // fires. These must be present on document and Element.prototype too.
+    // fires. These must be present on document and HTMLElement.prototype (where Chrome has them).
     #[test]
     fn global_event_handlers_present_on_document_and_element() {
         let mut rt = setup_runtime("<div></div>");
@@ -16669,7 +16669,7 @@ mod tests {
                     docInput: ('oninput' in document),
                     docChange: ('onchange' in document),
                     docClick: ('onclick' in document),
-                    elProtoInput: ('oninput' in Element.prototype),
+                    elProtoInput: ('oninput' in HTMLElement.prototype),
                     winInput: ('oninput' in window)
                 })"#,
             )
@@ -20899,15 +20899,15 @@ mod tests {
                         age.labels.length,
                         age.labels[0] === l2,
                         hid.labels.length,
-                        plain.labels.length,
-                        plain.control === null,
+                        plain.labels === undefined,
+                        plain.control === undefined,
                     ].join(',');
                 })()"#,
             )
             .unwrap();
         assert_eq!(
             result,
-            serde_json::json!("true,true,1,true,1,true,0,0,true"),
+            serde_json::json!("true,true,1,true,1,true,0,true,true"),
             "label association must follow the HTML labelable-element rules"
         );
     }
