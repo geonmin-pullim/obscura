@@ -78,7 +78,7 @@ OBSCURA_PROFILE=2 obscura serve          # pin a specific profile by index
 OBSCURA_ROTATE_PROFILE=1 obscura serve   # random profile per browser context
 ```
 
-Timezone is driven by the process zone so `Date` (`getTimezoneOffset`, `toString`) and `Intl.DateTimeFormat` report the same region. Default is `Europe/Berlin`; set it to match the exit IP:
+Timezone is driven by the process zone so `Date` (`getTimezoneOffset`, `toString`) and `Intl.DateTimeFormat` report the same region. Default is `Asia/Seoul`; set it to match the exit IP:
 
 ```bash
 OBSCURA_TIMEZONE=America/New_York obscura serve

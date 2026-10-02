@@ -107,7 +107,7 @@ OBSCURA_BLOCK_TRACKERS=0 obscura --stealth fetch https://example.com
 
 ### `OBSCURA_TIMEZONE`
 
-Pins the process timezone before V8/ICU reads it, so `Date` (`getTimezoneOffset`, `toString`) and `Intl.DateTimeFormat` report one consistent zone. Default `Europe/Berlin`. Set it to match the exit IP's region.
+Pins the process timezone before V8/ICU reads it, so `Date` (`getTimezoneOffset`, `toString`) and `Intl.DateTimeFormat` report one consistent zone. Default `Asia/Seoul`. Set it to match the exit IP's region.
 
 ```bash
 OBSCURA_TIMEZONE=America/New_York obscura serve

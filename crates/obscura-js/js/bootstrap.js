@@ -14609,7 +14609,7 @@ _markNative(SpeechSynthesisUtterance);
 _markNative(MediaStream); _markNative(MediaStreamTrack);
 _markNative(RTCPeerConnection); _markNative(RTCSessionDescription); _markNative(RTCIceCandidate);
 
-// Timezone is driven by the process TZ (set by the CLI, default Europe/Berlin),
+// Timezone is driven by the process TZ (set by the CLI, default Asia/Seoul),
 // so native Intl.DateTimeFormat and Date report the same zone. No JS override:
 // forcing a fixed zone here only on Intl left Date on UTC, which is the exact
 // cross-surface mismatch a fingerprinting script looks for.

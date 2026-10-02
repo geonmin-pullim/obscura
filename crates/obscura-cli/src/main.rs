@@ -353,7 +353,7 @@ async fn run_cli() -> anyhow::Result<()> {
     // both Date (getTimezoneOffset, toString) and Intl.DateTimeFormat from TZ; left
     // unset it defaults to UTC for Date while the page layer advertised a different
     // zone, a cross-surface mismatch fingerprinting scripts flag. Default to
-    // Europe/Berlin; set OBSCURA_TIMEZONE to match the exit IP's region. An existing
+    // Asia/Seoul; set OBSCURA_TIMEZONE to match the exit IP's region. An existing
     // TZ from the host is respected.
     // SAFETY: runs before any V8 isolate or worker thread starts, so the env is
     // effectively single threaded here.
@@ -366,7 +366,7 @@ async fn run_cli() -> anyhow::Result<()> {
         }
     } else if std::env::var_os("TZ").is_none() {
         unsafe {
-            std::env::set_var("TZ", "Europe/Berlin");
+            std::env::set_var("TZ", "Asia/Seoul");
         }
     }
 
